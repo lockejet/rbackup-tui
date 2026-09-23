@@ -358,17 +358,38 @@ RUN_MODE="${RUN_MODE:-task}"
 # ---------- 初始化日志 ----------
 SCRIPT_NAME="$(basename "$SCRIPT_PATH" .sh)"
 LOG_DATE="$(date +%Y%m%d)"
-LOG_FILE="${LOG_DIR}/${SCRIPT_NAME}_${LOG_DATE}.log"
+LOG_BASENAME="${SCRIPT_NAME}_${LOG_DATE}.log"
 
-if ! mkdir -p "$LOG_DIR" 2>/dev/null; then
-    LOG_FILE="./${SCRIPT_NAME}_${LOG_DATE}.log"
-    echo "警告：无法创建日志目录 $LOG_DIR，将使用当前目录 $LOG_FILE" >&2
+# 探测目录是否可写（mkdir + touch 测试文件）
+log_dir_writable() {
+    local dir="$1"
+    [ -z "$dir" ] && return 1
+    mkdir -p "$dir" 2>/dev/null || return 1
+    local testfile="$dir/.rbackup_write_test.$$"
+    touch "$testfile" 2>/dev/null || return 1
+    rm -f "$testfile" 2>/dev/null || true
+    return 0
+}
+
+# 优先 LOG_DIR，失败回退到脚本目录下 log/
+LOG_FILE=""
+if log_dir_writable "$LOG_DIR"; then
+    LOG_FILE="${LOG_DIR}/${LOG_BASENAME}"
+elif log_dir_writable "${SCRIPT_DIR}/log"; then
+    LOG_FILE="${SCRIPT_DIR}/log/${LOG_BASENAME}"
+    echo "警告：无法写入 $LOG_DIR，日志回退到 ${SCRIPT_DIR}/log/" >&2
+else
+    echo "错误：无法创建日志目录" >&2
+    echo "      尝试过: $LOG_DIR" >&2
+    echo "      尝试过: ${SCRIPT_DIR}/log" >&2
+    echo "      请检查权限或修改配置中的 LOG_DIR" >&2
+    exit 1
 fi
 
+# 最终验证
 if ! touch "$LOG_FILE" 2>/dev/null; then
-    LOG_FILE="./${SCRIPT_NAME}_${LOG_DATE}.log"
-    echo "警告：无法写入 $LOG_FILE，将使用当前目录 $LOG_FILE" >&2
-    touch "$LOG_FILE" || { echo "错误：无法创建日志文件" >&2; exit 1; }
+    echo "错误：无法写入日志文件 $LOG_FILE" >&2
+    exit 1
 fi
 
 # ---------- 辅助函数 ----------
