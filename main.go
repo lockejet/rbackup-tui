@@ -9,16 +9,33 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
+// ---------- 版本信息（-ldflags 注入） ----------
+var (
+	Version   = "dev"
+	BuildTime = "unknown"
+	GitCommit = "unknown"
+)
+
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
 var debugKeys = os.Getenv("RBACKUP_DEBUG_KEYS") != ""
 var debugCount int
+
+// ---------- 分隔线字符 ----------
+var sepChar = "┄"
+
+func init() {
+	if c := os.Getenv("RBACKUP_SEP"); c != "" {
+		sepChar = c
+	}
+}
 
 // ---------- 事件去重 ----------
 var (
@@ -44,13 +61,62 @@ func isDuplicateKey(event *tcell.EventKey) bool {
 	return dup
 }
 
-// ---------- 结果记录 ----------
-type taskOutcome struct {
-	Name   string
-	Result string // "成功" / "跳过" / "失败" / "挂载门禁失败"
+// ---------- 按键提示构造 ----------
+
+func hint(pairs ...string) string {
+	var b strings.Builder
+	for i := 0; i < len(pairs); i += 2 {
+		if i > 0 {
+			b.WriteString("  ")
+		}
+		b.WriteString(pairs[i])
+		b.WriteString("[white]")
+		b.WriteString(tview.Escape("[" + pairs[i+1] + "]"))
+		b.WriteString("[-]")
+	}
+	return b.String()
 }
 
-// ---------- 危险确认状态 ----------
+func hintDark(pairs ...string) string {
+	var parts []string
+	for i := 0; i < len(pairs); i += 2 {
+		parts = append(parts, pairs[i]+"["+pairs[i+1]+"]")
+	}
+	return "[darkgray]" + tview.Escape(strings.Join(parts, "  ")) + "[-]"
+}
+
+// ---------- 交互区状态 ----------
+type InteractState int
+
+const (
+	InteractIdle InteractState = iota
+	InteractConfirming
+	InteractRunning
+	InteractDone
+	InteractCancelled
+)
+
+func (s InteractState) String() string {
+	switch s {
+	case InteractIdle:
+		return "空闲"
+	case InteractConfirming:
+		return "等待确认"
+	case InteractRunning:
+		return "同步中"
+	case InteractDone:
+		return "已完成"
+	case InteractCancelled:
+		return "已取消"
+	}
+	return "未知"
+}
+
+type taskOutcome struct {
+	Name   string
+	Result string
+}
+
 type ConfirmState struct {
 	Queue        []*Task
 	Index        int
@@ -60,39 +126,56 @@ type ConfirmState struct {
 }
 
 type App struct {
-	app *tview.Application
+	app   *tview.Application
+	pages *tview.Pages
 
 	configPath string
 	scriptPath string
 	cfg        *Config
 
-	header    *tview.TextView
-	table     *tview.Table
-	tableArea *tview.Flex
-	tableHint *tview.TextView
+	header      *tview.TextView
+	table       *tview.Table
+	tableArea   *tview.Flex
+	tableSep    *tview.TextView
+	tableFooter *tview.TextView
 
 	interact     *tview.Flex
 	statusPart   *tview.TextView
+	statusSep    *tview.TextView
 	logPart      *tview.TextView
+	logSep       *tview.TextView
 	interactHint *tview.TextView
 
 	status *tview.TextView
 	help   *tview.TextView
 
-	running bool
-	cancel  context.CancelFunc
+	// 帮助浮层
+	helpVisible bool
+	helpPage    *tview.TextView
 
-	focusArea string // "table" / "interact"
+	running         bool
+	cancel          context.CancelFunc
+	cancelRequested bool
 
-	confirmState *ConfirmState
-	paused       bool
+	focusArea string
+
+	confirmState  *ConfirmState
+	interactState InteractState
+	interactExtra string
+
+	paused atomic.Bool
+
+	logBufMu sync.Mutex
+	logBuf   []string
 
 	blinkStop chan struct{}
 	blinkGen  int
 
-	// 当前任务的错误摘要（按任务收集）
 	errMu         sync.Mutex
 	currentErrors []string
+
+	ctrlDCount int
+	lastCtrlD  time.Time
 }
 
 // ---------- 路径查找 ----------
@@ -145,11 +228,23 @@ func NewApp() *App {
 	}
 
 	return &App{
-		app:        tview.NewApplication(),
-		configPath: configPath,
-		scriptPath: scriptPath,
-		focusArea:  "table",
+		app:           tview.NewApplication(),
+		configPath:    configPath,
+		scriptPath:    scriptPath,
+		focusArea:     "table",
+		interactState: InteractIdle,
 	}
+}
+
+// ---------- 分隔线 ----------
+
+func newSeparator() *tview.TextView {
+	tv := tview.NewTextView().SetDynamicColors(false)
+	tv.SetText(strings.Repeat(sepChar, 500))
+	tv.SetTextColor(tcell.ColorRed)
+	tv.SetWrap(false)
+	tv.SetWordWrap(false)
+	return tv
 }
 
 // ---------- UI ----------
@@ -162,41 +257,49 @@ func (a *App) setupUI() {
 	a.table.SetFixed(1, 0)
 	a.table.SetBorder(false)
 
-	a.tableHint = tview.NewTextView().SetDynamicColors(true).
-		SetText("[gray]移动[white][↑↓][gray]  选择[white][空格][gray]  " +
-			"全选[white][a][gray]  全不选[white][n][gray]  " +
-			"翻页[white][PgUp/PgDn][gray]  首尾[white][Home/End][gray]  " +
-			"运行[white][Enter][-]")
+	a.tableSep = newSeparator()
+
+	a.tableFooter = tview.NewTextView().SetDynamicColors(true)
 
 	a.tableArea = tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.table, 0, 1, true).
-		AddItem(a.tableHint, 1, 0, false)
+		AddItem(a.tableSep, 1, 0, false).
+		AddItem(a.tableFooter, 6, 0, false)
 	a.tableArea.SetBorder(true).SetTitle(" [1] 任务列表 [Tab/1] ")
 
 	a.statusPart = tview.NewTextView().SetDynamicColors(true)
+	a.statusSep = newSeparator()
 
 	a.logPart = tview.NewTextView().SetDynamicColors(true).
 		SetScrollable(true).
 		SetWrap(true).
 		SetWordWrap(true)
 
-	a.interactHint = tview.NewTextView().SetDynamicColors(true).
-		SetText("[gray]滚动[white][↑↓/j/k][gray]  翻页[white][PgUp/PgDn][gray]  " +
-			"首尾[white][Home/End/g/G][gray]  暂停[white][p/空格][-]")
+	a.logSep = newSeparator()
+
+	a.interactHint = tview.NewTextView().SetDynamicColors(true)
 
 	a.interact = tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.statusPart, 2, 0, false).
+		AddItem(a.statusSep, 1, 0, false).
 		AddItem(a.logPart, 0, 1, false).
+		AddItem(a.logSep, 1, 0, false).
 		AddItem(a.interactHint, 1, 0, false)
 	a.interact.SetBorder(true).SetTitle(" [2] 交互区 [Tab/2] ")
 
 	a.status = tview.NewTextView().SetDynamicColors(true)
-	a.help = tview.NewTextView().SetDynamicColors(false).
-		SetText("切换焦点[Tab/1/2]  运行[Enter]  dry-run[d]  " +
-			"挂载检查[m]  刷新[r]  退出[q]")
+	a.help = tview.NewTextView().SetDynamicColors(false)
+
+	a.table.SetSelectionChangedFunc(func(row, col int) {
+		a.updateTableFooter()
+	})
 
 	a.app.SetInputCapture(a.globalInputCapture)
 	a.updateFocusStyle()
+	a.updateHelp()
+
+	a.pages = tview.NewPages()
+	a.pages.AddPage("main", a.mainLayout(), true, true)
 }
 
 func (a *App) mainLayout() tview.Primitive {
@@ -209,13 +312,302 @@ func (a *App) mainLayout() tview.Primitive {
 }
 
 func (a *App) updateFocusStyle() {
-	if a.focusArea == "table" {
+	focusedTable := a.focusArea == "table"
+
+	if focusedTable {
 		a.tableArea.SetBorderColor(tcell.ColorGreen)
 		a.interact.SetBorderColor(tcell.ColorGray)
 	} else {
 		a.tableArea.SetBorderColor(tcell.ColorGray)
 		a.interact.SetBorderColor(tcell.ColorGreen)
 	}
+
+	if focusedTable {
+		a.interactHint.SetText(hintDark(
+			"滚动", "↑↓/j/k",
+			"翻页", "PgUp/PgDn",
+			"首尾", "Home/End/g/G",
+			"暂停", "p/空格"))
+	} else {
+		a.interactHint.SetText(hint(
+			"滚动", "↑↓/j/k",
+			"翻页", "PgUp/PgDn",
+			"首尾", "Home/End/g/G",
+			"暂停", "p/空格"))
+	}
+
+	a.updateTableFooter()
+}
+
+// ---------- 任务区底部 ----------
+
+func (a *App) updateTableFooter() {
+	focused := a.focusArea == "table"
+
+	var selected []string
+	for _, t := range a.cfg.Tasks {
+		if t.Selected {
+			selected = append(selected, t.Name)
+		}
+	}
+	var line1 string
+	if len(selected) == 0 {
+		if focused {
+			line1 = "[gray]未选择任何任务[-]"
+		} else {
+			line1 = "[darkgray]未选择任何任务[-]"
+		}
+	} else {
+		if focused {
+			line1 = fmt.Sprintf("[green]已选 %d:[-] %s",
+				len(selected), strings.Join(selected, " "))
+		} else {
+			line1 = fmt.Sprintf("[darkgreen]已选 %d:[-] [darkgray]%s[-]",
+				len(selected), strings.Join(selected, " "))
+		}
+	}
+
+	var line2 string
+	if focused {
+		line2 = hint(
+			"选择", "空格", "全选", "a", "全不选", "n",
+			"运行", "Enter", "预览", "d", "挂载", "m", "刷新", "r")
+	} else {
+		line2 = hintDark(
+			"选择", "空格", "全选", "a", "全不选", "n",
+			"运行", "Enter", "预览", "d", "挂载", "m", "刷新", "r")
+	}
+
+	var line3 string
+	if focused {
+		line3 = hint(
+			"移动", "↑↓/j/k",
+			"翻页", "PgUp/PgDn",
+			"首尾", "Home/End/g/G")
+	} else {
+		line3 = hintDark(
+			"移动", "↑↓/j/k",
+			"翻页", "PgUp/PgDn",
+			"首尾", "Home/End/g/G")
+	}
+
+	var cmdLines []string
+	row, _ := a.table.GetSelection()
+	if row > 0 && row <= len(a.cfg.Tasks) {
+		cmd := a.buildRsyncCommand(a.cfg.Tasks[row-1])
+		cmdLines = wrapCommand(cmd, 3, 90)
+	}
+	if len(cmdLines) == 0 {
+		cmdLines = []string{"(未选择任务)"}
+	}
+
+	var b strings.Builder
+	b.WriteString(line1)
+	b.WriteString("\n")
+	b.WriteString(line2)
+	b.WriteString("\n")
+	b.WriteString(line3)
+	for i, l := range cmdLines {
+		b.WriteString("\n")
+		if i == 0 {
+			if focused {
+				b.WriteString("[gray]命令:[-] ")
+			} else {
+				b.WriteString("[darkgray]命令:[-] ")
+			}
+		} else {
+			if focused {
+				b.WriteString("[gray]      [-] ")
+			} else {
+				b.WriteString("[darkgray]      [-] ")
+			}
+		}
+		if focused {
+			b.WriteString(tview.Escape(l))
+		} else {
+			b.WriteString("[darkgray]" + tview.Escape(l) + "[-]")
+		}
+	}
+
+	a.tableFooter.SetText(b.String())
+}
+
+func (a *App) buildRsyncCommand(t *Task) string {
+	if t == nil {
+		return ""
+	}
+	g := a.cfg.Global
+	parts := []string{"rsync"}
+
+	if g.GlobalOpts != "" {
+		parts = append(parts, g.GlobalOpts)
+	}
+	if t.Opts != "" {
+		parts = append(parts, t.Opts)
+	}
+
+	if t.NeedsDelete() {
+		dst := strings.TrimRight(t.Dst, "/")
+		recycle := dst + "/.deleted_files/rbackup/<ts>"
+		parts = append(parts,
+			"--delete",
+			"--exclude='/.deleted_files/'",
+			"--backup",
+			fmt.Sprintf("--backup-dir=\"%s\"", recycle))
+	}
+
+	if t.NeedsRemoveSource(g) {
+		parts = append(parts, "--remove-source-files")
+	}
+
+	sshCmd := fmt.Sprintf("ssh -p %s -i %s", g.SSHPort, g.SSHKey)
+	parts = append(parts, "-e", fmt.Sprintf("\"%s\"", sshCmd))
+	parts = append(parts, fmt.Sprintf("\"%s\"", t.Src))
+
+	fullDst := t.Dst
+	if !strings.Contains(fullDst, "@") {
+		fullDst = fmt.Sprintf("admin@%s:%s", g.Host, fullDst)
+	}
+	parts = append(parts, fmt.Sprintf("\"%s\"", fullDst))
+
+	return strings.Join(parts, " ")
+}
+
+func wrapCommand(cmd string, maxLines, maxWidth int) []string {
+	if len(cmd) == 0 {
+		return nil
+	}
+	var lines []string
+	remaining := cmd
+	for len(lines) < maxLines {
+		if len(remaining) <= maxWidth {
+			lines = append(lines, remaining)
+			return lines
+		}
+		cut := maxWidth
+		for cut > maxWidth/2 && remaining[cut] != ' ' {
+			cut--
+		}
+		if cut <= maxWidth/2 {
+			cut = maxWidth
+		}
+		lines = append(lines, remaining[:cut])
+		remaining = strings.TrimLeft(remaining[cut:], " ")
+	}
+	if len(remaining) > 0 {
+		last := lines[maxLines-1]
+		if len(last) > maxWidth-3 {
+			last = last[:maxWidth-3]
+		}
+		lines[maxLines-1] = last + "..."
+	}
+	return lines
+}
+
+// ---------- 帮助浮层 ----------
+
+func (a *App) helpContent() string {
+	var b strings.Builder
+
+	b.WriteString(fmt.Sprintf(
+		"[yellow::b]rbackup-tui[-:-:-]  [white]%s[-]  [gray](git: %s, 构建: %s)[-]\n",
+		Version, GitCommit, BuildTime))
+	b.WriteString("\n")
+	b.WriteString("[yellow]作者:[-]  Jet Locke\n")
+	b.WriteString("\n")
+
+	kv := func(key, desc string) string {
+		return fmt.Sprintf("  %-18s %s\n", key, desc)
+	}
+
+	b.WriteString("[yellow::b]─── 全局按键 ────────────────────────────────────────[-:-:-]\n")
+	b.WriteString(kv("F1 / ?", "显示帮助"))
+	b.WriteString(kv("q / Esc", "关闭帮助 / 退出程序（空闲时）"))
+	b.WriteString(kv("Tab / 1 / 2", "切换焦点"))
+	b.WriteString(kv("Ctrl+C", "停止任务（运行中）/ 退出（空闲）"))
+	b.WriteString(kv("Ctrl+D ×3", "强制退出程序"))
+	b.WriteString("\n")
+
+	b.WriteString("[yellow::b]─── 焦点在任务区 ────────────────────────────────────[-:-:-]\n")
+	b.WriteString(kv("↑ ↓ / j k", "移动光标"))
+	b.WriteString(kv("PgUp / PgDn", "翻页"))
+	b.WriteString(kv("Home / End / g G", "首 / 尾"))
+	b.WriteString(kv("空格", "选择 / 取消选择"))
+	b.WriteString(kv("a / n", "全选 / 全不选"))
+	b.WriteString(kv("Enter", "运行选中任务"))
+	b.WriteString(kv("d", "预览（dry-run）"))
+	b.WriteString(kv("m", "挂载检查"))
+	b.WriteString(kv("r", "刷新配置"))
+	b.WriteString("\n")
+
+	b.WriteString("[yellow::b]─── 焦点在交互区 ────────────────────────────────────[-:-:-]\n")
+	b.WriteString(kv("↑ ↓ / j k", "滚动日志"))
+	b.WriteString(kv("PgUp / PgDn", "翻页"))
+	b.WriteString(kv("Home / End / g G", "首 / 尾"))
+	b.WriteString(kv("p / 空格", "暂停 / 继续自动滚动"))
+	b.WriteString("\n")
+
+	b.WriteString("[yellow::b]─── 危险确认 ───────────────────────────────────────[-:-:-]\n")
+	b.WriteString(kv("y", "确认当前任务"))
+	b.WriteString(kv("n", "跳过当前任务"))
+	b.WriteString(kv("a", "全部确认"))
+	b.WriteString(kv("s", "全部跳过"))
+	b.WriteString("\n")
+
+	b.WriteString("[yellow::b]─── 关于 ────────────────────────────────────────────[-:-:-]\n")
+	b.WriteString("  rbackup-tui 是 rbackup.sh 的 TUI 前端\n")
+	b.WriteString("  配置文件: 与 rbackup.sh 共用 config.ini\n")
+	b.WriteString("  日志目录: 由 config.ini 的 LOG_DIR 决定\n")
+	b.WriteString("\n")
+	b.WriteString("[gray]按 q 或 Esc 关闭本帮助[-]\n")
+
+	return b.String()
+}
+
+func (a *App) showHelp() {
+	if a.helpVisible {
+		return
+	}
+	a.helpVisible = true
+
+	tv := tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
+	tv.SetBorder(true).SetTitle(" 帮助 ")
+	tv.SetText(a.helpContent())
+
+	a.helpPage = tv
+	a.pages.AddPage("help", tv, true, true)
+	a.app.SetFocus(tv)
+}
+
+func (a *App) hideHelp() {
+	if !a.helpVisible {
+		return
+	}
+	a.helpVisible = false
+	a.pages.RemovePage("help")
+	a.helpPage = nil
+	a.setFocus(a.focusArea)
+}
+
+// ---------- 帮助栏 ----------
+
+func (a *App) updateHelp() {
+	var txt string
+	switch {
+	case a.confirmState != nil:
+		txt = "切换焦点[Tab/1/2]  强制退出[Ctrl+D×3]  帮助[F1/?]"
+	case a.running:
+		if a.cancelRequested {
+			txt = "正在停止任务...  强制退出[Ctrl+D×3]  帮助[F1/?]"
+		} else {
+			txt = "切换焦点[Tab/1/2]  暂停[p/空格]  " +
+				"停止任务[Ctrl+C]  强制退出[Ctrl+D×3]  帮助[F1/?]"
+		}
+	default:
+		txt = "切换焦点[Tab/1/2]  退出[q/Esc/Ctrl+C]  " +
+			"强制退出[Ctrl+D×3]  帮助[F1/?]"
+	}
+	a.help.SetText(txt)
 }
 
 // ---------- 调试 ----------
@@ -260,11 +652,9 @@ func shouldFilterLine(line string) bool {
 	if t == "" {
 		return false
 	}
-	// 分隔线一律过滤
 	if strings.HasPrefix(t, "====") {
 		return true
 	}
-	// 每任务汇总：成功 N: xxx / 跳过 N[: xxx] / 失败 N[: xxx] / 挂载门禁失败 N[: xxx]
 	if regexp.MustCompile(`^(成功|跳过|失败|挂载门禁失败)\s+\d+`).MatchString(t) {
 		return true
 	}
@@ -279,15 +669,8 @@ func shouldFilterLine(line string) bool {
 func isErrorLine(line string) bool {
 	l := strings.ToLower(line)
 	markers := []string{
-		"rsync error",
-		"rsync:",
-		"[fail]",
-		"failed",
-		"error:",
-		"错误",
-		"失败",
-		"拒绝",
-		"不可恢复",
+		"rsync error", "rsync:", "[fail]", "failed", "error:",
+		"错误", "失败", "拒绝", "不可恢复",
 	}
 	for _, m := range markers {
 		if strings.Contains(l, m) {
@@ -366,7 +749,7 @@ func (a *App) toggleFocus() {
 	}
 }
 
-// ---------- 滚动 ----------
+// ---------- 日志滚动 ----------
 
 func (a *App) scrollLog(delta int) {
 	row, col := a.logPart.GetScrollOffset()
@@ -377,44 +760,165 @@ func (a *App) scrollLog(delta int) {
 	a.logPart.ScrollTo(newRow, col)
 }
 
-func (a *App) handleScrollKey(event *tcell.EventKey) bool {
+func (a *App) flushLogBuf() {
+	a.logBufMu.Lock()
+	buf := a.logBuf
+	a.logBuf = nil
+	a.logBufMu.Unlock()
+	for _, line := range buf {
+		fmt.Fprintln(a.logPart, tview.Escape(line))
+	}
+}
+
+func (a *App) handleLogScroll(event *tcell.EventKey) bool {
+	scrolled := false
+	upward := false
+	toBottom := false
 	switch event.Key() {
 	case tcell.KeyUp:
 		a.scrollLog(-1)
-		return true
+		scrolled = true
+		upward = true
 	case tcell.KeyDown:
 		a.scrollLog(1)
-		return true
+		scrolled = true
 	case tcell.KeyPgUp:
 		a.scrollLog(-10)
-		return true
+		scrolled = true
+		upward = true
 	case tcell.KeyPgDn:
 		a.scrollLog(10)
-		return true
+		scrolled = true
 	case tcell.KeyHome:
 		a.logPart.ScrollToBeginning()
-		return true
+		scrolled = true
+		upward = true
 	case tcell.KeyEnd:
 		a.logPart.ScrollToEnd()
+		scrolled = true
+		toBottom = true
+	}
+	if !scrolled && event.Key() == tcell.KeyRune {
+		switch event.Rune() {
+		case 'j':
+			a.scrollLog(1)
+			scrolled = true
+		case 'k':
+			a.scrollLog(-1)
+			scrolled = true
+			upward = true
+		case 'g':
+			a.logPart.ScrollToBeginning()
+			scrolled = true
+			upward = true
+		case 'G':
+			a.logPart.ScrollToEnd()
+			scrolled = true
+			toBottom = true
+		}
+	}
+	if !scrolled {
+		return false
+	}
+
+	if a.running {
+		if upward && !a.paused.Load() {
+			a.paused.Store(true)
+			a.setStatus("[yellow]⏸ 已暂停（按 p 继续）[-]")
+		} else if toBottom && a.paused.Load() {
+			a.paused.Store(false)
+			a.flushLogBuf()
+			a.updateStatus()
+		}
+	}
+	return true
+}
+
+func (a *App) handleTableNav(event *tcell.EventKey) bool {
+	row, col := a.table.GetSelection()
+	maxRow := len(a.cfg.Tasks)
+	if maxRow == 0 {
+		return false
+	}
+	moveTo := func(r int) {
+		if r < 1 {
+			r = 1
+		}
+		if r > maxRow {
+			r = maxRow
+		}
+		a.table.Select(r, col)
+	}
+	switch event.Key() {
+	case tcell.KeyUp:
+		moveTo(row - 1)
+		return true
+	case tcell.KeyDown:
+		moveTo(row + 1)
+		return true
+	case tcell.KeyPgUp:
+		moveTo(row - 10)
+		return true
+	case tcell.KeyPgDn:
+		moveTo(row + 10)
+		return true
+	case tcell.KeyHome:
+		moveTo(1)
+		return true
+	case tcell.KeyEnd:
+		moveTo(maxRow)
 		return true
 	}
 	if event.Key() == tcell.KeyRune {
 		switch event.Rune() {
 		case 'j':
-			a.scrollLog(1)
+			moveTo(row + 1)
 			return true
 		case 'k':
-			a.scrollLog(-1)
+			moveTo(row - 1)
 			return true
 		case 'g':
-			a.logPart.ScrollToBeginning()
+			moveTo(1)
 			return true
 		case 'G':
-			a.logPart.ScrollToEnd()
+			moveTo(maxRow)
 			return true
 		}
 	}
 	return false
+}
+
+// ---------- 请求取消 ----------
+
+func (a *App) requestCancel() {
+	if a.cancelRequested {
+		return
+	}
+	if a.cancel == nil {
+		return
+	}
+	a.cancel()
+	a.cancel = nil
+	a.cancelRequested = true
+	a.updateHelp()
+	a.updateStatus()
+}
+
+// ---------- Ctrl+D 提示 ----------
+
+func (a *App) showCtrlDPrompt(remaining int) {
+	a.setStatus(fmt.Sprintf("[yellow]Ctrl+D 再按 %d 次退出程序[-]", remaining))
+	gen := a.ctrlDCount
+	go func() {
+		time.Sleep(1600 * time.Millisecond)
+		a.app.QueueUpdateDraw(func() {
+			if a.ctrlDCount == gen &&
+				time.Since(a.lastCtrlD) >= 1500*time.Millisecond {
+				a.ctrlDCount = 0
+				a.updateStatus()
+			}
+		})
+	}()
 }
 
 // ---------- 全局按键 ----------
@@ -425,25 +929,67 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 	}
 	debugKey("global", event)
 
-	switch event.Key() {
-	case tcell.KeyTab:
-		a.toggleFocus()
-		return nil
-	case tcell.KeyCtrlC:
-		if a.confirmState != nil {
-			a.confirmAllSkip()
-			return nil
+	// 帮助键（F1 在部分终端被拦截，同时支持 ?）
+	if event.Key() == tcell.KeyF1 {
+		if a.helpVisible {
+			a.hideHelp()
+		} else {
+			a.showHelp()
 		}
-		if a.running && a.cancel != nil {
-			a.cancel()
-			a.cancel = nil
-			a.setStatus("[yellow]已请求取消[-]")
-			return nil
-		}
-		a.app.Stop()
 		return nil
 	}
+	if event.Key() == tcell.KeyRune {
+		switch event.Rune() {
+		case '?':
+			if a.helpVisible {
+				a.hideHelp()
+			} else {
+				a.showHelp()
+			}
+			return nil
+		}
+	}
 
+	// 帮助显示中：拦截关闭键，其余（方向键等）交给 help TextView
+	if a.helpVisible {
+		switch event.Key() {
+		case tcell.KeyEscape, tcell.KeyCtrlC:
+			a.hideHelp()
+			return nil
+		}
+		if event.Key() == tcell.KeyRune {
+			switch event.Rune() {
+			case 'q', 'Q':
+				a.hideHelp()
+				return nil
+			}
+		}
+		return event
+	}
+
+	if event.Key() == tcell.KeyCtrlD {
+		now := time.Now()
+		if now.Sub(a.lastCtrlD) < 1500*time.Millisecond {
+			a.ctrlDCount++
+		} else {
+			a.ctrlDCount = 1
+		}
+		a.lastCtrlD = now
+		if a.ctrlDCount >= 3 {
+			a.app.Stop()
+			return nil
+		}
+		a.showCtrlDPrompt(3 - a.ctrlDCount)
+		return nil
+	}
+	if a.ctrlDCount > 0 {
+		a.ctrlDCount = 0
+	}
+
+	if event.Key() == tcell.KeyTab {
+		a.toggleFocus()
+		return nil
+	}
 	if event.Key() == tcell.KeyRune {
 		switch event.Rune() {
 		case '1':
@@ -458,64 +1004,34 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 	if a.confirmState != nil {
 		return a.handleConfirmKey(event)
 	}
-
-	if event.Key() == tcell.KeyEscape {
-		if a.running && a.cancel != nil {
-			a.cancel()
-			a.cancel = nil
-			a.setStatus("[yellow]已请求取消[-]")
-			return nil
-		}
-		if a.focusArea == "interact" {
-			a.setFocus("table")
-			return nil
-		}
-		a.app.Stop()
-		return nil
-	}
-
 	if a.running {
-		if a.focusArea == "interact" && a.handleScrollKey(event) {
-			return nil
-		}
-		return event
+		return a.handleRunningKey(event)
 	}
-
-	if a.focusArea == "interact" {
-		if a.handleScrollKey(event) {
-			return nil
-		}
-		if event.Key() == tcell.KeyRune {
-			switch event.Rune() {
-			case 'p', 'P', ' ':
-				a.togglePause()
-				return nil
-			}
-		}
-		return event
-	}
-	return a.handleTableKey(event)
+	return a.handleIdleKey(event)
 }
 
+// ---------- 危险确认 ----------
+
 func (a *App) handleConfirmKey(event *tcell.EventKey) *tcell.EventKey {
-	if a.handleScrollKey(event) {
-		return nil
-	}
-
-	cs := a.confirmState
-	if cs == nil || cs.Index >= len(cs.Queue) {
-		return event
-	}
-
-	switch event.Key() {
-	case tcell.KeyEscape:
+	if event.Key() == tcell.KeyCtrlC {
 		a.confirmAllSkip()
 		return nil
-	case tcell.KeyEnter:
-		a.confirmCurrent(true)
+	}
+	if event.Key() == tcell.KeyEscape {
 		return nil
 	}
-
+	if event.Key() == tcell.KeyRune {
+		switch event.Rune() {
+		case 'q', 'Q':
+			return nil
+		}
+	}
+	if a.focusArea != "interact" {
+		return nil
+	}
+	if a.handleLogScroll(event) {
+		return nil
+	}
 	if event.Key() == tcell.KeyRune {
 		switch event.Rune() {
 		case 'y', 'Y':
@@ -532,10 +1048,59 @@ func (a *App) handleConfirmKey(event *tcell.EventKey) *tcell.EventKey {
 			return nil
 		}
 	}
-	return event
+	return nil
 }
 
-func (a *App) handleTableKey(event *tcell.EventKey) *tcell.EventKey {
+// ---------- 运行中 ----------
+
+func (a *App) handleRunningKey(event *tcell.EventKey) *tcell.EventKey {
+	switch event.Key() {
+	case tcell.KeyCtrlC:
+		a.requestCancel()
+		return nil
+	case tcell.KeyEscape:
+		return nil
+	}
+	if event.Key() == tcell.KeyRune {
+		switch event.Rune() {
+		case 'p', 'P', ' ':
+			a.togglePause()
+			return nil
+		case 'q', 'Q':
+			return nil
+		}
+	}
+	if a.handleLogScroll(event) {
+		return nil
+	}
+	return nil
+}
+
+// ---------- 空闲 ----------
+
+func (a *App) handleIdleKey(event *tcell.EventKey) *tcell.EventKey {
+	switch event.Key() {
+	case tcell.KeyEscape, tcell.KeyCtrlC:
+		a.app.Stop()
+		return nil
+	}
+	if event.Key() == tcell.KeyRune {
+		switch event.Rune() {
+		case 'q', 'Q':
+			a.app.Stop()
+			return nil
+		}
+	}
+	if a.focusArea == "interact" {
+		return a.handleInteractIdleKey(event)
+	}
+	return a.handleTableIdleKey(event)
+}
+
+func (a *App) handleTableIdleKey(event *tcell.EventKey) *tcell.EventKey {
+	if a.handleTableNav(event) {
+		return nil
+	}
 	switch event.Key() {
 	case tcell.KeyEnter:
 		a.runSelectedTasks()
@@ -561,21 +1126,34 @@ func (a *App) handleTableKey(event *tcell.EventKey) *tcell.EventKey {
 		case 'r', 'R':
 			a.reloadConfig()
 			return nil
-		case 'q', 'Q':
-			a.app.Stop()
-			return nil
 		}
 	}
 	return event
 }
 
+func (a *App) handleInteractIdleKey(event *tcell.EventKey) *tcell.EventKey {
+	if event.Key() == tcell.KeyRune {
+		switch event.Rune() {
+		case 'p', 'P', ' ':
+			a.togglePause()
+			return nil
+		}
+	}
+	if a.handleLogScroll(event) {
+		return nil
+	}
+	return nil
+}
+
 // ---------- 暂停 ----------
 
 func (a *App) togglePause() {
-	a.paused = !a.paused
-	if a.paused {
+	newPaused := !a.paused.Load()
+	a.paused.Store(newPaused)
+	if newPaused {
 		a.setStatus("[yellow]⏸ 已暂停（按 p 继续）[-]")
 	} else {
+		a.flushLogBuf()
 		a.logPart.ScrollToEnd()
 		a.updateStatus()
 	}
@@ -584,21 +1162,16 @@ func (a *App) togglePause() {
 // ---------- 状态刷新 ----------
 
 func (a *App) updateHeader() {
+	logPath := filepath.Join(a.cfg.Global.LogDir,
+		"rbackup_"+time.Now().Format("20060102")+".log")
 	txt := fmt.Sprintf(
-		"[yellow]脚本:[-] %s\n"+
-			"[yellow]配置:[-] %s\n"+
-			"[yellow]远端:[-] admin@%s:%s    "+
-			"[yellow]策略:[-] MOUNT_POLICY=%s\n"+
-			"[yellow]日志:[-] %s    "+
-			"[yellow]任务:[-] %d",
+		"[yellow]脚本:[-] %s  [gray]|[-]  [yellow]配置:[-] %s\n"+
+			"[yellow]远端:[-] admin@%s:%s  [gray]|[-]  [yellow]策略:[-] %s  [gray]|[-]  [yellow]日志:[-] %s",
 		a.scriptPath,
 		a.configPath,
 		a.cfg.Global.Host, a.cfg.Global.SSHPort,
 		a.cfg.Global.MountPolicy,
-		filepath.Join(a.cfg.Global.LogDir,
-			"rbackup_"+time.Now().Format("20060102")+".log"),
-		len(a.cfg.Tasks),
-	)
+		logPath)
 	a.header.SetText(txt)
 }
 
@@ -609,24 +1182,50 @@ func (a *App) updateStatus() {
 			sel++
 		}
 	}
-	a.status.SetText(fmt.Sprintf(
-		"[green]就绪[-]  |  已选: %d/%d  |  焦点: [yellow]%s[-]",
-		sel, len(a.cfg.Tasks), a.focusArea))
-}
 
-func (a *App) updateTableHint() {
-	var selected []string
-	for _, t := range a.cfg.Tasks {
-		if t.Selected {
-			selected = append(selected, t.Name)
+	var statusLabel, statusColor string
+	switch {
+	case a.confirmState != nil:
+		statusLabel = "等待确认"
+		statusColor = "[red]"
+	case a.running:
+		if a.paused.Load() {
+			statusLabel = "已暂停"
+			statusColor = "[yellow]"
+		} else {
+			statusLabel = "运行中"
+			statusColor = "[green]"
 		}
+	default:
+		statusLabel = "就绪"
+		statusColor = "[green]"
 	}
-	if len(selected) == 0 {
-		a.tableHint.SetText("[gray]未选择任何任务[-]")
-		return
+
+	var interactColor string
+	switch a.interactState {
+	case InteractIdle:
+		interactColor = "[gray]"
+	case InteractConfirming, InteractCancelled:
+		interactColor = "[yellow]"
+	case InteractRunning, InteractDone:
+		interactColor = "[green]"
 	}
-	a.tableHint.SetText(fmt.Sprintf("[green]已选 %d:[-] %s",
-		len(selected), strings.Join(selected, " ")))
+	interactStr := a.interactState.String()
+	if a.interactExtra != "" {
+		interactStr = interactStr + " " + a.interactExtra
+	}
+
+	focusCN := "任务区"
+	if a.focusArea == "interact" {
+		focusCN = "交互区"
+	}
+
+	a.status.SetText(fmt.Sprintf(
+		"%s%s[-]  |  已选: %d/%d  |  交互: %s%s[-]  |  焦点: [yellow]%s[-]",
+		statusColor, statusLabel,
+		sel, len(a.cfg.Tasks),
+		interactColor, interactStr,
+		focusCN))
 }
 
 func headerCell(text string) *tview.TableCell {
@@ -709,7 +1308,10 @@ func (a *App) refreshTasks() {
 		a.table.SetCell(row, 4, gateCell)
 	}
 
-	a.updateTableHint()
+	if len(a.cfg.Tasks) > 0 {
+		a.table.Select(1, 0)
+	}
+	a.updateTableFooter()
 }
 
 // ---------- 选择操作 ----------
@@ -787,12 +1389,10 @@ func (a *App) planRun(tasks []*Task, dryRun bool) {
 			safe = append(safe, t)
 		}
 	}
-
 	if len(dangerous) == 0 {
 		a.startRun(tasks, dryRun)
 		return
 	}
-
 	a.confirmState = &ConfirmState{
 		Queue:        dangerous,
 		Index:        0,
@@ -800,6 +1400,7 @@ func (a *App) planRun(tasks []*Task, dryRun bool) {
 		NonDangerous: safe,
 		DryRun:       dryRun,
 	}
+	a.interactState = InteractConfirming
 
 	a.logPart.Clear()
 	fmt.Fprintf(a.logPart,
@@ -808,6 +1409,8 @@ func (a *App) planRun(tasks []*Task, dryRun bool) {
 	fmt.Fprintln(a.logPart, "")
 
 	a.showConfirmStep()
+	a.updateStatus()
+	a.updateHelp()
 }
 
 func (a *App) showConfirmStep() {
@@ -824,15 +1427,19 @@ func (a *App) showConfirmStep() {
 	total := len(cs.Queue)
 	idx := cs.Index + 1
 
-	a.statusPart.SetText(fmt.Sprintf(
-		"[red::b]⚠ 危险确认 %d/%d[-:-:-]  "+
-			"[white]y[-]=确认  [white]n[-]=跳过  "+
-			"[white]a[-]=全部确认  [white]s[-]=全部跳过\n"+
-			"[yellow]任务:[-] %s",
-		idx, total, task.Name))
+	a.interactExtra = fmt.Sprintf("(%d/%d)", idx, total)
 
-	a.startBlink(fmt.Sprintf("⚠ 危险确认 %d/%d：y=确认 n=跳过 a=全部确认 s=全部跳过 ⚠",
-		idx, total))
+	hintLine := hint(
+		"确认", "y",
+		"跳过", "n",
+		"全部确认", "a",
+		"全部跳过", "s")
+	a.statusPart.SetText(fmt.Sprintf(
+		"[red::b]⚠ 危险确认 %d/%d[-:-:-]  %s\n"+
+			"[yellow]任务:[-] %s",
+		idx, total, hintLine, task.Name))
+
+	a.startBlink(fmt.Sprintf("⚠ 危险确认 %d/%d ⚠", idx, total))
 
 	fmt.Fprintf(a.logPart, "[red::b]=== 危险操作确认 (%d/%d) ===[-:-:-]\n\n", idx, total)
 	fmt.Fprintf(a.logPart, "  任务: %s\n", task.Name)
@@ -856,11 +1463,6 @@ func (a *App) showConfirmStep() {
 			"  └─ 说明: [red]--remove-source-files 会删除本地源文件（不可恢复）[-]")
 	}
 	fmt.Fprintln(a.logPart, "")
-	fmt.Fprintln(a.logPart, "  确认[white][y][-]  跳过[white][n][-]  "+
-		"全部确认[white][a][-]  全部跳过[white][s][-]  取消全部[white][Esc][-]")
-	fmt.Fprintln(a.logPart, "")
-	fmt.Fprintln(a.logPart, "  [gray]↑↓ 滚动查看详情[-]")
-	fmt.Fprintln(a.logPart, "")
 	a.logPart.ScrollToEnd()
 
 	for i, t := range a.cfg.Tasks {
@@ -871,6 +1473,7 @@ func (a *App) showConfirmStep() {
 	}
 	a.refreshTasks()
 	a.setFocus("interact")
+	a.updateStatus()
 }
 
 func (a *App) confirmCurrent(confirm bool) {
@@ -934,6 +1537,7 @@ func (a *App) finishConfirm() {
 	cs := a.confirmState
 	a.stopBlink()
 	a.confirmState = nil
+	a.interactExtra = ""
 	a.refreshTasks()
 
 	var toRun []*Task
@@ -967,8 +1571,10 @@ func (a *App) finishConfirm() {
 		fmt.Fprintln(a.logPart, "")
 		fmt.Fprintln(a.logPart, "[red]无可执行任务，返回主界面。[-]")
 		a.logPart.ScrollToEnd()
+		a.interactState = InteractIdle
 		a.setFocus("table")
 		a.setStatus("[yellow]无可执行任务[-]")
+		a.updateHelp()
 		return
 	}
 
@@ -998,17 +1604,15 @@ func (a *App) startRun(tasks []*Task, dryRun bool) {
 		return
 	}
 	a.running = true
-	a.paused = false
+	a.paused.Store(false)
+	a.cancelRequested = false
+	a.interactState = InteractRunning
 	ctx, cancel := context.WithCancel(context.Background())
 	a.cancel = cancel
 
-	names := make([]string, 0, len(tasks))
-	for _, t := range tasks {
-		names = append(names, t.Name)
-	}
 	mode := "实际执行"
 	if dryRun {
-		mode = "dry-run 预览"
+		mode = "预览"
 	}
 
 	a.logPart.Clear()
@@ -1027,6 +1631,8 @@ func (a *App) startRun(tasks []*Task, dryRun bool) {
 	fmt.Fprintln(a.logPart, "")
 
 	a.setFocus("interact")
+	a.updateStatus()
+	a.updateHelp()
 	go a.doRun(ctx, tasks, dryRun, mode)
 }
 
@@ -1035,6 +1641,7 @@ func (a *App) doRun(ctx context.Context, tasks []*Task, dryRun bool, mode string
 		a.app.QueueUpdateDraw(func() {
 			a.running = false
 			a.cancel = nil
+			a.cancelRequested = false
 		})
 	}()
 
@@ -1046,13 +1653,12 @@ func (a *App) doRun(ctx context.Context, tasks []*Task, dryRun bool, mode string
 	for i, t := range tasks {
 		i, t := i, t
 
-		// 任务开始前，重置错误收集
 		a.errMu.Lock()
 		a.currentErrors = nil
 		a.errMu.Unlock()
 
-		// 更新状态摘要
 		a.app.QueueUpdateDraw(func() {
+			a.interactExtra = fmt.Sprintf("(%d/%d)", i+1, total)
 			a.statusPart.SetText(fmt.Sprintf(
 				"[yellow]模式:[-] %s    "+
 					"[yellow]进度:[-] %d/%d    "+
@@ -1061,6 +1667,7 @@ func (a *App) doRun(ctx context.Context, tasks []*Task, dryRun bool, mode string
 					"[red]失败 %d[-]  [orange]挂载门禁失败 %d[-]",
 				mode, i+1, total, t.Name,
 				success, skipped, failed, mountFailed))
+			a.updateStatus()
 		})
 
 		var res *TaskResult
@@ -1070,7 +1677,6 @@ func (a *App) doRun(ctx context.Context, tasks []*Task, dryRun bool, mode string
 			res = StreamTask(ctx, a.scriptPath, a.configPath, t.Name, a.outputLine)
 		}
 
-		// 判定结果
 		var result string
 		switch {
 		case res.Err != nil || res.ExitCode < 0:
@@ -1091,13 +1697,11 @@ func (a *App) doRun(ctx context.Context, tasks []*Task, dryRun bool, mode string
 		}
 		outcomes = append(outcomes, taskOutcome{Name: t.Name, Result: result})
 
-		// 取错误摘要
 		a.errMu.Lock()
 		errs := append([]string(nil), a.currentErrors...)
 		a.currentErrors = nil
 		a.errMu.Unlock()
 
-		// 追加累积行到日志
 		a.app.QueueUpdateDraw(func() {
 			var color string
 			switch result {
@@ -1134,24 +1738,12 @@ func (a *App) doRun(ctx context.Context, tasks []*Task, dryRun bool, mode string
 				}
 			}
 			fmt.Fprintln(a.logPart, "")
-			if !a.paused {
+			if !a.paused.Load() {
 				a.logPart.ScrollToEnd()
 			}
+			a.updateStatus()
 		})
 
-		// 更新累积计数
-		a.app.QueueUpdateDraw(func() {
-			a.statusPart.SetText(fmt.Sprintf(
-				"[yellow]模式:[-] %s    "+
-					"[yellow]进度:[-] %d/%d    "+
-					"[yellow]当前:[-] %s [green](完成)[-]\n"+
-					"[green]成功 %d[-]  [yellow]跳过 %d[-]  "+
-					"[red]失败 %d[-]  [orange]挂载门禁失败 %d[-]",
-				mode, i+1, total, t.Name,
-				success, skipped, failed, mountFailed))
-		})
-
-		// 若被取消，跳出
 		select {
 		case <-ctx.Done():
 			cancelled = true
@@ -1161,18 +1753,19 @@ func (a *App) doRun(ctx context.Context, tasks []*Task, dryRun bool, mode string
 	}
 
 finish:
-	// 最终汇总
 	a.app.QueueUpdateDraw(func() {
-		// 若被取消，剩余任务记为"未执行"
 		var notRun []string
 		if cancelled {
 			done := len(outcomes)
 			for i := done; i < total; i++ {
 				notRun = append(notRun, tasks[i].Name)
 			}
+			a.interactState = InteractCancelled
+		} else {
+			a.interactState = InteractDone
 		}
+		a.interactExtra = ""
 
-		// 分隔线
 		fmt.Fprintln(a.logPart,
 			"[cyan]════════════════════════════════════════════════════════[-]")
 		if cancelled {
@@ -1183,7 +1776,6 @@ finish:
 				" [green][%s] 全部任务完成[-]\n", time.Now().Format("15:04:05"))
 		}
 
-		// 按类别收集任务名
 		var sName, skName, fName, mName []string
 		for _, o := range outcomes {
 			switch o.Result {
@@ -1197,7 +1789,6 @@ finish:
 				mName = append(mName, o.Name)
 			}
 		}
-
 		if len(sName) > 0 {
 			fmt.Fprintf(a.logPart, " [green]成功 %d: %s[-]\n",
 				len(sName), strings.Join(sName, " "))
@@ -1230,15 +1821,21 @@ finish:
 			"[cyan]════════════════════════════════════════════════════════[-]")
 		a.logPart.ScrollToEnd()
 
-		// 状态摘要
-		a.statusPart.SetText(fmt.Sprintf(
-			"[green]运行完成[-]  "+
-				"[green]成功 %d[-]  [yellow]跳过 %d[-]  "+
-				"[red]失败 %d[-]  [orange]挂载门禁失败 %d[-]",
-			success, skipped, failed, mountFailed))
-		a.setStatus(fmt.Sprintf(
-			"[green]运行完成[-] 成功 %d  跳过 %d  失败 %d  挂载门禁失败 %d",
-			success, skipped, failed, mountFailed))
+		if cancelled {
+			a.statusPart.SetText(fmt.Sprintf(
+				"[yellow]运行被取消[-]  "+
+					"[green]成功 %d[-]  [yellow]跳过 %d[-]  "+
+					"[red]失败 %d[-]  [orange]挂载门禁失败 %d[-]",
+				success, skipped, failed, mountFailed))
+		} else {
+			a.statusPart.SetText(fmt.Sprintf(
+				"[green]运行完成[-]  "+
+					"[green]成功 %d[-]  [yellow]跳过 %d[-]  "+
+					"[red]失败 %d[-]  [orange]挂载门禁失败 %d[-]",
+				success, skipped, failed, mountFailed))
+		}
+		a.updateStatus()
+		a.updateHelp()
 	})
 }
 
@@ -1254,11 +1851,17 @@ func (a *App) outputLine(line string) {
 		}
 		a.errMu.Unlock()
 	}
+
+	if a.paused.Load() {
+		a.logBufMu.Lock()
+		a.logBuf = append(a.logBuf, clean)
+		a.logBufMu.Unlock()
+		return
+	}
+
 	a.app.QueueUpdateDraw(func() {
 		fmt.Fprintln(a.logPart, tview.Escape(clean))
-		if !a.paused {
-			a.logPart.ScrollToEnd()
-		}
+		a.logPart.ScrollToEnd()
 	})
 }
 
@@ -1269,7 +1872,9 @@ func (a *App) runMountCheck() {
 		return
 	}
 	a.running = true
-	a.paused = false
+	a.paused.Store(false)
+	a.cancelRequested = false
+	a.interactState = InteractRunning
 	ctx, cancel := context.WithCancel(context.Background())
 	a.cancel = cancel
 
@@ -1277,12 +1882,18 @@ func (a *App) runMountCheck() {
 	a.statusPart.SetText("[yellow]挂载检查[-]\n[gray]正在检查远端挂载状态...[-]")
 	fmt.Fprintln(a.logPart, tview.Escape("正在检查远端挂载状态..."))
 	a.setFocus("interact")
+	a.updateStatus()
+	a.updateHelp()
 
 	go func() {
 		defer func() {
 			a.app.QueueUpdateDraw(func() {
 				a.running = false
 				a.cancel = nil
+				a.cancelRequested = false
+				a.interactState = InteractDone
+				a.updateStatus()
+				a.updateHelp()
 			})
 		}()
 
@@ -1293,7 +1904,7 @@ func (a *App) runMountCheck() {
 			}
 			a.app.QueueUpdateDraw(func() {
 				fmt.Fprintln(a.logPart, tview.Escape(clean))
-				if !a.paused {
+				if !a.paused.Load() {
 					a.logPart.ScrollToEnd()
 				}
 			})
@@ -1335,8 +1946,11 @@ func main() {
 	a := NewApp()
 
 	if debugKeys {
+		fmt.Fprintf(os.Stderr, "[DEBUG] version=%s git=%s build=%s\n",
+			Version, GitCommit, BuildTime)
 		fmt.Fprintf(os.Stderr, "[DEBUG] script=%s\n", a.scriptPath)
 		fmt.Fprintf(os.Stderr, "[DEBUG] config=%s\n", a.configPath)
+		fmt.Fprintf(os.Stderr, "[DEBUG] sep=%q\n", sepChar)
 	}
 
 	cfg, err := ParseConfig(a.configPath)
@@ -1353,7 +1967,7 @@ func main() {
 	a.refreshTasks()
 	a.updateStatus()
 
-	a.app.SetRoot(a.mainLayout(), true).EnableMouse(true)
+	a.app.SetRoot(a.pages, true).EnableMouse(true)
 	a.setFocus("table")
 
 	if err := a.app.Run(); err != nil {
