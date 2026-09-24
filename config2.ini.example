@@ -1,0 +1,57 @@
+# ============================================================
+# 备份配置文件示例
+# 放置于脚本同目录下，或通过 --config 指定其他路径
+# ============================================================
+
+# 全局 SSH 参数
+HOST=example.com
+SSH_PORT=22
+SSH_KEY=/home/admin/.ssh/id_ed25519
+
+# 日志目录（自动生成 ${SCRIPT_NAME}_${DATE}.log）
+LOG_DIR=/var/log
+
+# 全局 rsync 默认选项（可被任务级 opts 追加覆盖）
+GLOBAL_OPTS=-avzhu --progress
+
+# 提权选项，需要命令行中用--sudo 激活
+RSYNC_PATH=sudo rsync
+
+# ============================================================
+# 任务定义
+# ============================================================
+
+[task_Personal_Vault]
+src=/srv/st1000dm/Personal_Vault
+dst=/mnt/wd4000g
+opts=--size-only
+delete=yes
+
+[task_Study]
+src=/srv/st1000dm/Study
+dst=/mnt/wd4000g
+delete=yes
+
+[task_Life]
+src=/srv/st1000dm/Life
+dst=/mnt/wd4000g
+opts=-rtvh
+delete=yes
+
+[task_infra_secrets_cipher]
+src=/srv/st1000dm/.cipher.d/infra_secrets
+dst=/mnt/wd4000g/.cipher.d
+opts=-avh
+delete=yes
+require_unmounted=yes
+mount_point=/mnt/wd4000g/infra_secrets
+mount_fstype=fuse.gocryptfs
+
+[task_Work_Cipher]
+src=/srv/st1000dm/.cipher.d/Work
+dst=/mnt/wd4000g/.cipher.d
+opts=-avh
+delete=yes
+require_unmounted=yes
+mount_point=/mnt/wd4000g/Work
+mount_fstype=fuse.gocryptfs
