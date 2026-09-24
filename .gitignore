@@ -1,0 +1,5 @@
+log/
+backup/
+rbackup.d/
+rbackup-tui.d/
+*.log
