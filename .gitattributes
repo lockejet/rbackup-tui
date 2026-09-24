@@ -1,0 +1,2 @@
+config-lnas.ini filter=git-crypt diff=git-crypt
+config-office.ini filter=git-crypt diff=git-crypt

@@ -1,0 +1,65 @@
+# ============================================================
+# 全局配置
+# ============================================================
+HOST=example.com
+SSH_PORT=22
+SSH_KEY=~/.ssh/id_ed25519
+LOG_DIR=/var/log/rbackup
+GLOBAL_OPTS=-avzhu --progress
+RSYNC_PATH=sudo rsync
+DEFAULT_REMOVE_SOURCE=no
+
+# 挂载门禁策略: skip | fail | ignore
+#   skip   : 未挂载 → 记警告跳过，不算失败（默认，适合 cron）
+#   fail   : 未挂载 → 记失败，影响退出码
+#   ignore : 完全不检查
+MOUNT_POLICY=skip
+
+# ============================================================
+# 任务
+# ============================================================
+[task_alice]
+src=/d/alice/my_company/
+dst=/srv/st1000dm/Work/doc-alice
+opts=--no-perms --chown=admin:users --update --delete-after
+delete=yes
+remove_source=no
+# 挂载门禁：只有挂载为 gocryptfs 时才同步
+require_mount=yes
+mount_path=/srv/st1000dm/Work
+mount_fstype=fuse.gocryptfs
+
+[task_bob]
+src=/d/bob/my_company/
+dst=/srv/st1000dm/Work/doc-bob
+opts=--no-perms --chown=admin:users --update --delete-after
+delete=yes
+remove_source=no
+# 挂载门禁：只有挂载为 gocryptfs 时才同步
+require_mount=yes
+mount_path=/srv/st1000dm/Work
+mount_fstype=fuse.gocryptfs
+
+[task_charlie]
+src=/d/charlie/DevOps
+dst=/srv/st1000dm
+opts=--no-perms --chown=admin:users --update --delete-after
+delete=yes
+remove_source=no
+require_mount=no
+
+[task_Test1]
+src=~/rsync/test1.d/
+dst=/srv/st1000dm/test1.d
+delete=yes
+require_mount=yes
+mount_path=/srv/st1000dm/test1.d
+mount_fstype=fuse.gocryptfs
+
+[task_Test2]
+src=~/rsync/test2.d/
+dst=/srv/st1000dm/test2.d
+delete=yes
+require_mount=no
+mount_path=/srv/st1000dm/test2.d
+mount_fstype=fuse.gocryptfs
