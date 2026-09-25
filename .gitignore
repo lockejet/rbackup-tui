@@ -3,7 +3,7 @@ backup/
 rbackup.d/
 rbackup-tui.d/
 *.log
-#bin/
+bin/
 #rbackup-tui
 #rbackup-tui.exe
 config.ini
