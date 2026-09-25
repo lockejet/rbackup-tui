@@ -14,3 +14,4 @@ config-*.ini
 *.swp
 .vscode/
 .idea/
+*.save
