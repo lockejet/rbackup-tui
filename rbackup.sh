@@ -18,11 +18,12 @@ while [ -L "$SCRIPT_PATH" ]; do
 done
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 
-# ---------- 默认配置 ----------
+# ---------- 默认配置（通用占位符，敏感信息放 config.ini） ----------
 DEFAULT_CONFIG="${SCRIPT_DIR}/config.ini"
-DEFAULT_HOST="192.168.8.254"
-DEFAULT_SSH_PORT="28375"
-DEFAULT_SSH_KEY="/home/admin/.ssh/id_ed25519-host_admin"
+DEFAULT_HOST="localhost"
+DEFAULT_SSH_PORT="22"
+DEFAULT_SSH_USER="admin"
+DEFAULT_SSH_KEY="${HOME}/.ssh/id_ed25519"
 DEFAULT_LOG_DIR="/var/log/rbackup"
 DEFAULT_GLOBAL_OPTS="-avzhu --progress"
 DEFAULT_RSYNC_PATH="sudo rsync"
@@ -39,6 +40,7 @@ CHECK_MOUNT_ONLY=0
 NO_MOUNT_CHECK=0
 HOST="$DEFAULT_HOST"
 SSH_PORT="$DEFAULT_SSH_PORT"
+SSH_USER="$DEFAULT_SSH_USER"
 SSH_KEY="$DEFAULT_SSH_KEY"
 LOG_DIR="$DEFAULT_LOG_DIR"
 GLOBAL_OPTS="$DEFAULT_GLOBAL_OPTS"
@@ -163,6 +165,16 @@ while true; do
   - 删除模式下，远端 .deleted_files 回收站会被 --exclude 排除。
   - 非交互环境下交互确认自动跳过，但 remove_source 未用 --force 会报错退出。
 
+配置文件（config.ini）全局键:
+  HOST        远端主机（默认 localhost）
+  SSH_PORT    SSH 端口（默认 22）
+  SSH_USER    SSH 用户名（默认 admin）
+  SSH_KEY     SSH 私钥路径（默认 ~/.ssh/id_ed25519）
+  LOG_DIR     日志目录（默认 /var/log/rbackup）
+  GLOBAL_OPTS rsync 全局选项
+  RSYNC_PATH  提权命令
+  MOUNT_POLICY 挂载门禁策略
+
 挂载门禁语义:
   require_mounted=yes    目标必须已挂载（用于 源明文 → 目标明文挂载点）
   require_unmounted=yes  目标必须未挂载（用于 源密文 → 目标密文目录）
@@ -221,7 +233,6 @@ while IFS= read -r line || [ -n "$line" ]; do
                 remove_source)       TASK_REMOVE_SOURCE["$task_name"]="$value" ;;
                 require_mounted)     TASK_REQUIRE_MOUNTED["$task_name"]="$value" ;;
                 require_unmounted)   TASK_REQUIRE_UNMOUNTED["$task_name"]="$value" ;;
-                # 兼容旧键：require_mount=yes 映射到 require_mounted
                 require_mount)
                     case "$value" in
                         yes) TASK_REQUIRE_MOUNTED["$task_name"]="yes" ;;
@@ -229,7 +240,6 @@ while IFS= read -r line || [ -n "$line" ]; do
                     esac
                     ;;
                 mount_point)         TASK_MOUNT_POINT["$task_name"]="$value" ;;
-                # 兼容旧键：mount_path 视同 mount_point
                 mount_path)          TASK_MOUNT_POINT["$task_name"]="$value" ;;
                 mount_fstype)        TASK_MOUNT_FSTYPE["$task_name"]="$value" ;;
                 *) echo "警告：任务节 '$task_name' 中存在未知键 '$key'，已忽略" >&2 ;;
@@ -238,6 +248,7 @@ while IFS= read -r line || [ -n "$line" ]; do
             case "$key" in
                 HOST)                   HOST="$value" ;;
                 SSH_PORT)               SSH_PORT="$value" ;;
+                SSH_USER)               SSH_USER="$value" ;;
                 SSH_KEY)                SSH_KEY="$value" ;;
                 LOG_DIR)                LOG_DIR="$value" ;;
                 GLOBAL_OPTS)            GLOBAL_OPTS="$value" ;;
@@ -271,7 +282,7 @@ done
 # ---------- 列表模式 ----------
 if [ $LIST_MODE -eq 1 ]; then
     echo "配置文件: $CONFIG_FILE"
-    echo "远程主机: $HOST:$SSH_PORT"
+    echo "远程主机: ${SSH_USER}@${HOST}:${SSH_PORT}"
     echo "挂载策略: MOUNT_POLICY=$MOUNT_POLICY"
     echo ""
     if [ ${#TASK_NAMES[@]} -eq 0 ]; then
@@ -360,7 +371,6 @@ SCRIPT_NAME="$(basename "$SCRIPT_PATH" .sh)"
 LOG_DATE="$(date +%Y%m%d)"
 LOG_BASENAME="${SCRIPT_NAME}_${LOG_DATE}.log"
 
-# 探测目录是否可写（mkdir + touch 测试文件）
 log_dir_writable() {
     local dir="$1"
     [ -z "$dir" ] && return 1
@@ -371,7 +381,6 @@ log_dir_writable() {
     return 0
 }
 
-# 优先 LOG_DIR，失败回退到脚本目录下 log/
 LOG_FILE=""
 if log_dir_writable "$LOG_DIR"; then
     LOG_FILE="${LOG_DIR}/${LOG_BASENAME}"
@@ -386,7 +395,6 @@ else
     exit 1
 fi
 
-# 最终验证
 if ! touch "$LOG_FILE" 2>/dev/null; then
     echo "错误：无法写入日志文件 $LOG_FILE" >&2
     exit 1
@@ -408,17 +416,14 @@ get_basename() {
 
 # 远端挂载检查
 #   参数: mode  path  want_fstype
-#         mode = "mounted"   要求已挂载（TARGET == path 且 FSTYPE 匹配）
-#         mode = "unmounted" 要求未挂载（TARGET != path）
 #   返回: 0=通过  1=未通过  2=SSH/检查错误
-#   stdout: 通过时输出当前状态描述；失败时输出诊断标记（__UNMOUNTED__ 等）
 remote_mount_check2() {
     local mode="$1"
     local path="$2"
     local want_fstype="${3:-}"
 
     local out rc
-    out=$(ssh -p "$SSH_PORT" -i "$SSH_KEY" "admin@${HOST}" \
+    out=$(ssh -p "$SSH_PORT" -i "$SSH_KEY" "${SSH_USER}@${HOST}" \
           "if [ ! -e '$path' ]; then echo '__NO_PATH__'; exit 0; fi; \
            findmnt -rn -T '$path' -o TARGET,FSTYPE" 2>/dev/null) \
         && rc=0 || rc=$?
@@ -465,7 +470,6 @@ remote_mount_check2() {
         echo "$fstype"
         return 0
     else
-        # unmounted
         if [ "$tgt" = "$path" ]; then
             echo "__MOUNTED__ fstype=$fstype"
             return 1
@@ -475,12 +479,12 @@ remote_mount_check2() {
     fi
 }
 
-# 打印挂载失败诊断信息（含完整 SSH 命令、绝对路径、多级备选）
+# 打印挂载失败诊断信息
 print_mount_fail_hint() {
     local mode="$1"
     local path="$2"
     local diag="$3"
-    local ssh_prefix="ssh -p ${SSH_PORT} -i ${SSH_KEY} admin@${HOST}"
+    local ssh_prefix="ssh -p ${SSH_PORT} -i ${SSH_KEY} ${SSH_USER}@${HOST}"
 
     case "$diag" in
         __UNMOUNTED__*)
@@ -577,7 +581,7 @@ print_mount_fail_hint() {
     esac
 }
 
-# 仅当「源不带 / 且 basename 与目标 basename 相同」时才警告嵌套
+# 嵌套目录警告
 confirm_task() {
     local task_name="$1" src="$2" dst="$3"
 
@@ -653,7 +657,6 @@ do_backup() {
                 fi
                 ;;
             1)
-                # 门禁失败，打印诊断
                 print_mount_fail_hint "$gate_mode" "$check_path" "$mount_info"
                 if [ $CHECK_MOUNT_ONLY -eq 1 ]; then
                     return 2
@@ -667,7 +670,6 @@ do_backup() {
                 fi
                 ;;
             2)
-                # SSH 或检查错误
                 print_mount_fail_hint "$gate_mode" "$check_path" "$mount_info"
                 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务 '$task_name' 挂载检查失败。" | tee -a "$LOG_FILE"
                 return 3
@@ -685,13 +687,13 @@ do_backup() {
     local parent_dir
     parent_dir="$(dirname "$remote_dst")"
 
-    if ! ssh -p "$SSH_PORT" -i "$SSH_KEY" "admin@${HOST}" "test -d '$parent_dir'" 2>/dev/null; then
+    if ! ssh -p "$SSH_PORT" -i "$SSH_KEY" "${SSH_USER}@${HOST}" "test -d '$parent_dir'" 2>/dev/null; then
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] 错误：远程父目录 '$parent_dir' 不存在，无法创建目标目录 '$remote_dst'。" | tee -a "$LOG_FILE"
         return 1
     fi
 
     if [ $DRY_RUN -eq 0 ] && [ $AUTO_DRY -eq 0 ]; then
-        if ! ssh -p "$SSH_PORT" -i "$SSH_KEY" "admin@${HOST}" "mkdir -p '$remote_dst'" 2>&1 | tee -a "$LOG_FILE"; then
+        if ! ssh -p "$SSH_PORT" -i "$SSH_KEY" "${SSH_USER}@${HOST}" "mkdir -p '$remote_dst'" 2>&1 | tee -a "$LOG_FILE"; then
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] 错误：无法创建远程目标目录 '$remote_dst'" | tee -a "$LOG_FILE"
             return 1
         fi
@@ -701,7 +703,7 @@ do_backup() {
 
     local full_dst="$dst"
     if ! contains_host "$full_dst"; then
-        full_dst="admin@${HOST}:${full_dst}"
+        full_dst="${SSH_USER}@${HOST}:${full_dst}"
     fi
     local remote_path
     remote_path="${full_dst#*:}"
@@ -712,7 +714,6 @@ do_backup() {
         local timestamp
         timestamp="$(date +%Y%m%d_%H%M)"
         recycle_bin="${remote_path}/.deleted_files/${SCRIPT_NAME}/${timestamp}"
-        # --exclude 防止 --delete 删除回收站自身
         delete_opts="--delete --exclude='/.deleted_files/' --backup --backup-dir=\"${recycle_bin}\""
     fi
 
@@ -775,7 +776,7 @@ do_backup() {
 
     if [ "$delete_flag" = "yes" ]; then
         local mkdir_cmd="mkdir -p \"${recycle_bin}\""
-        if ! ssh -p "$SSH_PORT" -i "$SSH_KEY" "admin@${HOST}" "$mkdir_cmd" 2>/dev/null; then
+        if ! ssh -p "$SSH_PORT" -i "$SSH_KEY" "${SSH_USER}@${HOST}" "$mkdir_cmd" 2>/dev/null; then
             echo "错误：无法在远程创建回收站目录 ${recycle_bin}" | tee -a "$LOG_FILE"
             return 1
         fi
@@ -808,7 +809,7 @@ echo "============================================================" | tee -a "$L
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 备份脚本启动 (PID: $$)" | tee -a "$LOG_FILE"
 echo "脚本路径: $SCRIPT_PATH" | tee -a "$LOG_FILE"
 echo "配置文件: $CONFIG_FILE" | tee -a "$LOG_FILE"
-echo "远程主机: $HOST:$SSH_PORT" | tee -a "$LOG_FILE"
+echo "远程主机: ${SSH_USER}@${HOST}:${SSH_PORT}" | tee -a "$LOG_FILE"
 
 if [ $NO_MOUNT_CHECK -eq 1 ]; then
     echo "挂载门禁: 已禁用 (--no-mount-check)" | tee -a "$LOG_FILE"

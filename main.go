@@ -141,7 +141,6 @@ type App struct {
 
 	interact     *tview.Flex
 	statusPart   *tview.TextView
-	statusSep    *tview.TextView
 	logPart      *tview.TextView
 	logSep       *tview.TextView
 	interactHint *tview.TextView
@@ -149,7 +148,6 @@ type App struct {
 	status *tview.TextView
 	help   *tview.TextView
 
-	// 帮助浮层
 	helpVisible bool
 	helpPage    *tview.TextView
 
@@ -258,30 +256,24 @@ func (a *App) setupUI() {
 	a.table.SetBorder(false)
 
 	a.tableSep = newSeparator()
-
 	a.tableFooter = tview.NewTextView().SetDynamicColors(true)
 
 	a.tableArea = tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.table, 0, 1, true).
 		AddItem(a.tableSep, 1, 0, false).
-		AddItem(a.tableFooter, 6, 0, false)
+		AddItem(a.tableFooter, 4, 0, false)
 	a.tableArea.SetBorder(true).SetTitle(" [1] 任务列表 [Tab/1] ")
 
 	a.statusPart = tview.NewTextView().SetDynamicColors(true)
-	a.statusSep = newSeparator()
 
 	a.logPart = tview.NewTextView().SetDynamicColors(true).
-		SetScrollable(true).
-		SetWrap(true).
-		SetWordWrap(true)
+		SetScrollable(true).SetWrap(true).SetWordWrap(true)
 
 	a.logSep = newSeparator()
-
 	a.interactHint = tview.NewTextView().SetDynamicColors(true)
 
 	a.interact = tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(a.statusPart, 2, 0, false).
-		AddItem(a.statusSep, 1, 0, false).
+		AddItem(a.statusPart, 1, 0, false).
 		AddItem(a.logPart, 0, 1, false).
 		AddItem(a.logSep, 1, 0, false).
 		AddItem(a.interactHint, 1, 0, false)
@@ -305,8 +297,8 @@ func (a *App) setupUI() {
 func (a *App) mainLayout() tview.Primitive {
 	return tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(a.header, 4, 0, false).
-		AddItem(a.tableArea, 0, 2, true).
-		AddItem(a.interact, 0, 3, false).
+		AddItem(a.tableArea, 0, 3, true).
+		AddItem(a.interact, 0, 2, false).
 		AddItem(a.status, 1, 0, false).
 		AddItem(a.help, 1, 0, false)
 }
@@ -324,18 +316,13 @@ func (a *App) updateFocusStyle() {
 
 	if focusedTable {
 		a.interactHint.SetText(hintDark(
-			"滚动", "↑↓/j/k",
-			"翻页", "PgUp/PgDn",
-			"首尾", "Home/End/g/G",
-			"暂停", "p/空格"))
+			"滚动", "↑↓/j/k", "翻页", "PgUp/PgDn",
+			"首尾", "Home/End/g/G", "暂停", "p/空格"))
 	} else {
 		a.interactHint.SetText(hint(
-			"滚动", "↑↓/j/k",
-			"翻页", "PgUp/PgDn",
-			"首尾", "Home/End/g/G",
-			"暂停", "p/空格"))
+			"滚动", "↑↓/j/k", "翻页", "PgUp/PgDn",
+			"首尾", "Home/End/g/G", "暂停", "p/空格"))
 	}
-
 	a.updateTableFooter()
 }
 
@@ -350,88 +337,88 @@ func (a *App) updateTableFooter() {
 			selected = append(selected, t.Name)
 		}
 	}
+	total := len(a.cfg.Tasks)
+
+	// 第 1 行：任务数 + 已选择
 	var line1 string
 	if len(selected) == 0 {
 		if focused {
-			line1 = "[gray]未选择任何任务[-]"
+			line1 = fmt.Sprintf("[yellow]任务数:[-] %d   [gray]已选择:[-] 0", total)
 		} else {
-			line1 = "[darkgray]未选择任何任务[-]"
+			line1 = fmt.Sprintf("[darkgray]任务数: %d  已选择: 0[-]", total)
 		}
 	} else {
+		names := strings.Join(selected, " ")
 		if focused {
-			line1 = fmt.Sprintf("[green]已选 %d:[-] %s",
-				len(selected), strings.Join(selected, " "))
+			line1 = fmt.Sprintf("[yellow]任务数:[-] %d   [green]已选择:[-] %d  [gray]%s[-]",
+				total, len(selected), names)
 		} else {
-			line1 = fmt.Sprintf("[darkgreen]已选 %d:[-] [darkgray]%s[-]",
-				len(selected), strings.Join(selected, " "))
+			line1 = fmt.Sprintf("[darkgray]任务数: %d  已选择: %d  %s[-]",
+				total, len(selected), names)
 		}
 	}
 
-	var line2 string
+	// 第 2 行：操作键
+	var opsStr string
 	if focused {
-		line2 = hint(
+		opsStr = hint(
 			"选择", "空格", "全选", "a", "全不选", "n",
 			"运行", "Enter", "预览", "d", "挂载", "m", "刷新", "r")
 	} else {
-		line2 = hintDark(
+		opsStr = hintDark(
 			"选择", "空格", "全选", "a", "全不选", "n",
 			"运行", "Enter", "预览", "d", "挂载", "m", "刷新", "r")
 	}
 
-	var line3 string
+	// 第 3 行：导航键
+	var navStr string
 	if focused {
-		line3 = hint(
-			"移动", "↑↓/j/k",
-			"翻页", "PgUp/PgDn",
+		navStr = hint(
+			"移动", "↑↓/j/k", "翻页", "PgUp/PgDn",
 			"首尾", "Home/End/g/G")
 	} else {
-		line3 = hintDark(
-			"移动", "↑↓/j/k",
-			"翻页", "PgUp/PgDn",
+		navStr = hintDark(
+			"移动", "↑↓/j/k", "翻页", "PgUp/PgDn",
 			"首尾", "Home/End/g/G")
 	}
 
-	var cmdLines []string
+	// 第 4 行：等效命令（1 行，超出截断）
+	var cmdLine string
 	row, _ := a.table.GetSelection()
 	if row > 0 && row <= len(a.cfg.Tasks) {
 		cmd := a.buildRsyncCommand(a.cfg.Tasks[row-1])
-		cmdLines = wrapCommand(cmd, 3, 90)
+		cmdLine = cmd
 	}
-	if len(cmdLines) == 0 {
-		cmdLines = []string{"(未选择任务)"}
+	if cmdLine == "" {
+		cmdLine = "(未选择任务)"
+	}
+	// 截断到 120 字符
+	if len(cmdLine) > 120 {
+		cmdLine = cmdLine[:117] + "..."
 	}
 
 	var b strings.Builder
 	b.WriteString(line1)
 	b.WriteString("\n")
-	b.WriteString(line2)
+	b.WriteString(opsStr)
 	b.WriteString("\n")
-	b.WriteString(line3)
-	for i, l := range cmdLines {
-		b.WriteString("\n")
-		if i == 0 {
-			if focused {
-				b.WriteString("[gray]命令:[-] ")
-			} else {
-				b.WriteString("[darkgray]命令:[-] ")
-			}
-		} else {
-			if focused {
-				b.WriteString("[gray]      [-] ")
-			} else {
-				b.WriteString("[darkgray]      [-] ")
-			}
-		}
-		if focused {
-			b.WriteString(tview.Escape(l))
-		} else {
-			b.WriteString("[darkgray]" + tview.Escape(l) + "[-]")
-		}
+	b.WriteString(navStr)
+	b.WriteString("\n")
+	if focused {
+		b.WriteString("[gray]命令:[-] ")
+	} else {
+		b.WriteString("[darkgray]命令:[-] ")
+	}
+	if focused {
+		b.WriteString(tview.Escape(cmdLine))
+	} else {
+		b.WriteString("[darkgray]" + tview.Escape(cmdLine) + "[-]")
 	}
 
 	a.tableFooter.SetText(b.String())
 }
 
+// buildRsyncCommand 生成等效 rsync 命令
 func (a *App) buildRsyncCommand(t *Task) string {
 	if t == nil {
 		return ""
@@ -464,44 +451,17 @@ func (a *App) buildRsyncCommand(t *Task) string {
 	parts = append(parts, "-e", fmt.Sprintf("\"%s\"", sshCmd))
 	parts = append(parts, fmt.Sprintf("\"%s\"", t.Src))
 
+	sshUser := g.SSHUser
+	if sshUser == "" {
+		sshUser = "admin"
+	}
 	fullDst := t.Dst
 	if !strings.Contains(fullDst, "@") {
-		fullDst = fmt.Sprintf("admin@%s:%s", g.Host, fullDst)
+		fullDst = fmt.Sprintf("%s@%s:%s", sshUser, g.Host, fullDst)
 	}
 	parts = append(parts, fmt.Sprintf("\"%s\"", fullDst))
 
 	return strings.Join(parts, " ")
-}
-
-func wrapCommand(cmd string, maxLines, maxWidth int) []string {
-	if len(cmd) == 0 {
-		return nil
-	}
-	var lines []string
-	remaining := cmd
-	for len(lines) < maxLines {
-		if len(remaining) <= maxWidth {
-			lines = append(lines, remaining)
-			return lines
-		}
-		cut := maxWidth
-		for cut > maxWidth/2 && remaining[cut] != ' ' {
-			cut--
-		}
-		if cut <= maxWidth/2 {
-			cut = maxWidth
-		}
-		lines = append(lines, remaining[:cut])
-		remaining = strings.TrimLeft(remaining[cut:], " ")
-	}
-	if len(remaining) > 0 {
-		last := lines[maxLines-1]
-		if len(last) > maxWidth-3 {
-			last = last[:maxWidth-3]
-		}
-		lines[maxLines-1] = last + "..."
-	}
-	return lines
 }
 
 // ---------- 帮助浮层 ----------
@@ -627,24 +587,10 @@ func debugKey(scope string, event *tcell.EventKey) {
 // ---------- 过滤与错误识别 ----------
 
 var filterPrefixes = []string{
-	"备份脚本启动 (PID:",
-	"脚本路径:",
-	"配置文件:",
-	"远程主机:",
-	"日志文件:",
-	"挂载门禁:",
-	"任务选择:",
-	"强制模式:",
-	"提权已启用:",
-	"模式: 任务模式",
-	"模式: 临时任务",
-	"模式: 仅挂载检查",
-	"[CHECK-MOUNT]",
-	"[DRY-RUN]",
-	"汇总:",
-	"跳过 0",
-	"失败 0",
-	"挂载门禁失败 0",
+	"备份脚本启动 (PID:", "脚本路径:", "配置文件:", "远程主机:",
+	"日志文件:", "挂载门禁:", "任务选择:", "强制模式:", "提权已启用:",
+	"模式: 任务模式", "模式: 临时任务", "模式: 仅挂载检查",
+	"[CHECK-MOUNT]", "[DRY-RUN]", "汇总:", "跳过 0", "失败 0", "挂载门禁失败 0",
 }
 
 func shouldFilterLine(line string) bool {
@@ -771,32 +717,26 @@ func (a *App) flushLogBuf() {
 }
 
 func (a *App) handleLogScroll(event *tcell.EventKey) bool {
-	scrolled := false
-	upward := false
-	toBottom := false
+	scrolled, upward, toBottom := false, false, false
 	switch event.Key() {
 	case tcell.KeyUp:
 		a.scrollLog(-1)
-		scrolled = true
-		upward = true
+		scrolled, upward = true, true
 	case tcell.KeyDown:
 		a.scrollLog(1)
 		scrolled = true
 	case tcell.KeyPgUp:
 		a.scrollLog(-10)
-		scrolled = true
-		upward = true
+		scrolled, upward = true, true
 	case tcell.KeyPgDn:
 		a.scrollLog(10)
 		scrolled = true
 	case tcell.KeyHome:
 		a.logPart.ScrollToBeginning()
-		scrolled = true
-		upward = true
+		scrolled, upward = true, true
 	case tcell.KeyEnd:
 		a.logPart.ScrollToEnd()
-		scrolled = true
-		toBottom = true
+		scrolled, toBottom = true, true
 	}
 	if !scrolled && event.Key() == tcell.KeyRune {
 		switch event.Rune() {
@@ -805,16 +745,13 @@ func (a *App) handleLogScroll(event *tcell.EventKey) bool {
 			scrolled = true
 		case 'k':
 			a.scrollLog(-1)
-			scrolled = true
-			upward = true
+			scrolled, upward = true, true
 		case 'g':
 			a.logPart.ScrollToBeginning()
-			scrolled = true
-			upward = true
+			scrolled, upward = true, true
 		case 'G':
 			a.logPart.ScrollToEnd()
-			scrolled = true
-			toBottom = true
+			scrolled, toBottom = true, true
 		}
 	}
 	if !scrolled {
@@ -891,10 +828,7 @@ func (a *App) handleTableNav(event *tcell.EventKey) bool {
 // ---------- 请求取消 ----------
 
 func (a *App) requestCancel() {
-	if a.cancelRequested {
-		return
-	}
-	if a.cancel == nil {
+	if a.cancelRequested || a.cancel == nil {
 		return
 	}
 	a.cancel()
@@ -929,7 +863,6 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 	}
 	debugKey("global", event)
 
-	// 帮助键（F1 在部分终端被拦截，同时支持 ?）
 	if event.Key() == tcell.KeyF1 {
 		if a.helpVisible {
 			a.hideHelp()
@@ -950,7 +883,6 @@ func (a *App) globalInputCapture(event *tcell.EventKey) *tcell.EventKey {
 		}
 	}
 
-	// 帮助显示中：拦截关闭键，其余（方向键等）交给 help TextView
 	if a.helpVisible {
 		switch event.Key() {
 		case tcell.KeyEscape, tcell.KeyCtrlC:
@@ -1164,12 +1096,16 @@ func (a *App) togglePause() {
 func (a *App) updateHeader() {
 	logPath := filepath.Join(a.cfg.Global.LogDir,
 		"rbackup_"+time.Now().Format("20060102")+".log")
+	sshUser := a.cfg.Global.SSHUser
+	if sshUser == "" {
+		sshUser = "admin"
+	}
 	txt := fmt.Sprintf(
 		"[yellow]脚本:[-] %s  [gray]|[-]  [yellow]配置:[-] %s\n"+
-			"[yellow]远端:[-] admin@%s:%s  [gray]|[-]  [yellow]策略:[-] %s  [gray]|[-]  [yellow]日志:[-] %s",
+			"[yellow]远端:[-] %s@%s:%s  [gray]|[-]  [yellow]策略:[-] %s  [gray]|[-]  [yellow]日志:[-] %s",
 		a.scriptPath,
 		a.configPath,
-		a.cfg.Global.Host, a.cfg.Global.SSHPort,
+		sshUser, a.cfg.Global.Host, a.cfg.Global.SSHPort,
 		a.cfg.Global.MountPolicy,
 		logPath)
 	a.header.SetText(txt)
@@ -1429,14 +1365,9 @@ func (a *App) showConfirmStep() {
 
 	a.interactExtra = fmt.Sprintf("(%d/%d)", idx, total)
 
-	hintLine := hint(
-		"确认", "y",
-		"跳过", "n",
-		"全部确认", "a",
-		"全部跳过", "s")
+	hintLine := hint("确认", "y", "跳过", "n", "全部确认", "a", "全部跳过", "s")
 	a.statusPart.SetText(fmt.Sprintf(
-		"[red::b]⚠ 危险确认 %d/%d[-:-:-]  %s\n"+
-			"[yellow]任务:[-] %s",
+		"[red::b]⚠ 危险确认 %d/%d[-:-:-]  %s    [yellow]任务:[-] %s",
 		idx, total, hintLine, task.Name))
 
 	a.startBlink(fmt.Sprintf("⚠ 危险确认 %d/%d ⚠", idx, total))
@@ -1453,7 +1384,12 @@ func (a *App) showConfirmStep() {
 	}
 	fmt.Fprintf(a.logPart, "  ├─ 危险选项: [yellow]%s[-]\n", strings.Join(flags, ", "))
 	fmt.Fprintf(a.logPart, "  ├─ 源:   %s\n", task.Src)
-	fmt.Fprintf(a.logPart, "  ├─ 目标: admin@%s:%s\n", a.cfg.Global.Host, task.Dst)
+	sshUser := a.cfg.Global.SSHUser
+	if sshUser == "" {
+		sshUser = "admin"
+	}
+	fmt.Fprintf(a.logPart, "  ├─ 目标: %s@%s:%s\n",
+		sshUser, a.cfg.Global.Host, task.Dst)
 	if task.NeedsDelete() {
 		fmt.Fprintln(a.logPart,
 			"  ├─ 说明: [yellow]--delete 会删除目标端多余文件（进回收站）[-]")
@@ -1617,7 +1553,7 @@ func (a *App) startRun(tasks []*Task, dryRun bool) {
 
 	a.logPart.Clear()
 	a.statusPart.SetText(fmt.Sprintf(
-		"[yellow]模式:[-] %s    [yellow]任务数:[-] %d    [yellow]当前:[-] -\n"+
+		"[yellow]模式:[-] %s    [yellow]任务数:[-] %d    [yellow]当前:[-] -    "+
 			"[green]成功 0[-]  [yellow]跳过 0[-]  [red]失败 0[-]  "+
 			"[orange]挂载门禁失败 0[-]",
 		mode, len(tasks)))
@@ -1662,7 +1598,7 @@ func (a *App) doRun(ctx context.Context, tasks []*Task, dryRun bool, mode string
 			a.statusPart.SetText(fmt.Sprintf(
 				"[yellow]模式:[-] %s    "+
 					"[yellow]进度:[-] %d/%d    "+
-					"[yellow]当前:[-] %s\n"+
+					"[yellow]当前:[-] %s    "+
 					"[green]成功 %d[-]  [yellow]跳过 %d[-]  "+
 					"[red]失败 %d[-]  [orange]挂载门禁失败 %d[-]",
 				mode, i+1, total, t.Name,
@@ -1879,7 +1815,7 @@ func (a *App) runMountCheck() {
 	a.cancel = cancel
 
 	a.logPart.Clear()
-	a.statusPart.SetText("[yellow]挂载检查[-]\n[gray]正在检查远端挂载状态...[-]")
+	a.statusPart.SetText("[yellow]挂载检查[-]  [gray]正在检查远端挂载状态...[-]")
 	fmt.Fprintln(a.logPart, tview.Escape("正在检查远端挂载状态..."))
 	a.setFocus("interact")
 	a.updateStatus()

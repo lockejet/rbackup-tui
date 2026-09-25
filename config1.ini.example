@@ -3,6 +3,7 @@
 # ============================================================
 HOST=example.com
 SSH_PORT=22
+SSH_USER=admin
 SSH_KEY=~/.ssh/id_ed25519
 LOG_DIR=/var/log/rbackup
 GLOBAL_OPTS=-avzhu --progress
