@@ -9,6 +9,7 @@ import (
 type GlobalConfig struct {
 	Host         string
 	SSHPort      string
+	SSHUser      string
 	SSHKey       string
 	LogDir       string
 	GlobalOpts   string
@@ -27,14 +28,14 @@ type Task struct {
 	RemoveSource string
 
 	// 挂载门禁
-	RequireMounted   string // "yes" / "no" / ""
-	RequireUnmounted string // "yes" / "no" / ""
+	RequireMounted   string
+	RequireUnmounted string
 	MountPoint       string
 	MountFstype      string
 
 	// 运行时字段
 	Selected    bool
-	MountState  string // "", "OK", "WARN", "FAIL"
+	MountState  string
 	MountDetail string
 }
 
@@ -47,8 +48,9 @@ type Config struct {
 
 func defaultGlobal() GlobalConfig {
 	return GlobalConfig{
-		Host:         "192.0.2.10",
-		SSHPort:      "28375",
+		Host:         "localhost",
+		SSHPort:      "22",
+		SSHUser:      "admin",
 		SSHKey:       "~/.ssh/id_ed25519",
 		LogDir:       "/var/log/rbackup",
 		GlobalOpts:   "-avzhu --progress",
@@ -102,6 +104,8 @@ func ParseConfig(path string) (*Config, error) {
 				cfg.Global.Host = val
 			case "SSH_PORT":
 				cfg.Global.SSHPort = val
+			case "SSH_USER":
+				cfg.Global.SSHUser = val
 			case "SSH_KEY":
 				cfg.Global.SSHKey = val
 			case "LOG_DIR":

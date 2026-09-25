@@ -3,3 +3,14 @@ backup/
 rbackup.d/
 rbackup-tui.d/
 *.log
+#bin/
+#rbackup-tui
+#rbackup-tui.exe
+config.ini
+config-office.ini
+config-lnas.ini
+config-*.ini
+!config*.ini.example
+*.swp
+.vscode/
+.idea/
