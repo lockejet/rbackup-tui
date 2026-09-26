@@ -118,3 +118,33 @@ help:
 	@echo "  make uninstall          卸载"
 	@echo "  make version            显示版本"
 	@echo "  make clean              清空 bin/"
+
+# ---------- 打包 ----------
+VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
+DIST_DIR := dist
+PKG_NAME := rbackup-tui-$(VERSION)
+
+.PHONY: package package-linux package-linux-arm64 package-win
+package: package-linux package-linux-arm64 package-win
+	@echo ">>> 打包完成，产物在 $(DIST_DIR)/"
+
+package-linux: build-linux
+	@mkdir -p $(DIST_DIR)
+	@tar czf $(DIST_DIR)/$(PKG_NAME)-linux-amd64.tar.gz \
+	    -C bin/linux rbackup-tui
+	@echo ">>> $(DIST_DIR)/$(PKG_NAME)-linux-amd64.tar.gz"
+
+package-linux-arm64: build-linux-arm64
+	@mkdir -p $(DIST_DIR)
+	@tar czf $(DIST_DIR)/$(PKG_NAME)-linux-arm64.tar.gz \
+	    -C bin/linux rbackup-tui-arm64
+	@echo ">>> $(DIST_DIR)/$(PKG_NAME)-linux-arm64.tar.gz"
+
+package-win: build-win
+	@mkdir -p $(DIST_DIR)
+	@cd bin/windows && zip -q ../../$(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip rbackup-tui.exe
+	@echo ">>> $(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip"
+
+.PHONY: clean-dist
+clean-dist:
+	rm -rf $(DIST_DIR)
