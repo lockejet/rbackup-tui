@@ -15,10 +15,6 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 - 界面说明
 - 安装
 - 配置
-  - 全局配置
-  - 任务配置
-  - 典型配置一：Office → LNAS（明文源）
-  - 典型配置二：LNAS → NAS（密文源）
 - 使用
 - 快捷键
 - 挂载门禁
@@ -49,26 +45,27 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 
 ## 界面说明
 
+以 config1.ini.example 为例：
+
     ┌─ rbackup ─────────────────────────────────────────────────────┐
-    │ 脚本: /home/admin/rbackup/rbackup.sh  |  配置: config1.ini    │
+    │ 脚本: /home/user/rbackup/rbackup.sh  |  配置: config1.ini     │
     │ 远端: admin@example.com:22  |  策略: skip  |  日志: ...      │
     ├─ [1] 任务列表 [Tab/1] ────────────────────────────────────────┤
-    │  ● alice          /d/alice/my_company/  → /srv/st1000dm/...  │
-    │  ● bob            /d/bob/my_company/    → /srv/st1000dm/...  │
+    │  ● alice          /d/alice/my_company/  → /srv/.../doc-alice │
+    │  ● bob            /d/bob/my_company/    → /srv/.../doc-bob   │
     │  ○ charlie        /d/charlie/DevOps     → /srv/st1000dm      │
+    │  ○ Test1          ~/rsync/test1.d/      → /srv/st1000dm/t1   │
+    │  ○ Test2          ~/rsync/test2.d/      → /srv/st1000dm/t2   │
     │                                                                │
-    │ 已选 2: alice bob                                              │
+    │ 任务数: 5  已选择: 2  alice bob                               │
     │ 选择[空格]  全选[a]  全不选[n]  运行[Enter]  预览[d]  挂载[m]  │
     │ 移动[↑↓/j/k]  翻页[PgUp/PgDn]  首尾[Home/End/g/G]              │
     │ 命令: rsync -avzhu --progress --delete ...                    │
     ├─ [2] 交互区 [Tab/2] ──────────────────────────────────────────┤
     │ 模式: 实际执行   进度: 2/5   当前: bob                         │
-    │ 成功 1  跳过 0  失败 0  挂载门禁失败 0                         │
-    │ ────────────────────────────────────────────────────────────  │
-    │ [2026-09-24 10:00:15] 任务: bob                                │
+    │ [2026-01-01 10:00:15] 任务: bob                                │
     │   sending incremental file list                                │
     │   ...                                                          │
-    │ ────────────────────────────────────────────────────────────  │
     │ 滚动[↑↓/j/k]  翻页[PgUp/PgDn]  首尾[Home/End/g/G]  暂停[p]    │
     ├────────────────────────────────────────────────────────────────┤
     │ 就绪  |  已选: 2/5  |  交互: 同步中 (2/5)  |  焦点: 任务区     │
@@ -107,7 +104,7 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 
     make uninstall
 
-只删除二进制和脚本，不删除 ~/rbackup/ 下的配置和日志。
+只删除二进制和脚本，不删除配置文件目录。
 
 ---
 
@@ -119,9 +116,10 @@ rbackup-tui 与 rbackup.sh 共用 config.ini，格式一致。
 
 | 键 | 说明 | 默认 |
 |---|---|---|
-| HOST | 远端主机 | 192.168.8.254 |
-| SSH_PORT | SSH 端口 | 28375 |
-| SSH_KEY | SSH 私钥路径 | ~/.ssh/id_ed25519-host_admin |
+| HOST | 远端主机 | localhost |
+| SSH_PORT | SSH 端口 | 22 |
+| SSH_USER | SSH 用户名 | admin |
+| SSH_KEY | SSH 私钥路径 | ~/.ssh/id_ed25519 |
 | LOG_DIR | 日志目录 | /var/log/rbackup |
 | GLOBAL_OPTS | rsync 全局选项 | -avzhu --progress |
 | RSYNC_PATH | 提权命令 | sudo rsync |
@@ -135,6 +133,16 @@ MOUNT_POLICY 取值：
 - ignore：不检查
 
 ### 任务配置
+
+    [task_example]
+    src=/path/to/source/
+    dst=/path/to/target/
+    opts=--no-perms --chown=user:group --update
+    delete=yes
+    remove_source=no
+    require_mounted=yes
+    mount_point=/path/to/mount/point
+    mount_fstype=fuse.gocryptfs
 
 | 键 | 说明 |
 |---|---|
@@ -156,18 +164,9 @@ MOUNT_POLICY 取值：
 
 推荐使用新键，但旧键依然有效。
 
----
+### 示例配置一：明文源 → 明文挂载点
 
-### 典型配置一：Office → LNAS（明文源）
-
-场景：Windows 上的明文目录，同步到 LNAS 上已解密的 gocryptfs 挂载点。
-
-- 源：明文
-- 目标：gocryptfs 明文挂载点
-- 门禁：require_mounted（目标必须已挂载）
-- 使用旧键书写（require_mount / mount_path），兼容旧脚本
-
-文件名建议：config1.ini.example
+对应 `config1.ini.example`。源是明文目录，目标是已解密的 gocryptfs 挂载点，使用旧键 `require_mount` / `mount_path` 书写。
 
     # ============================================================
     # 全局配置
@@ -181,9 +180,6 @@ MOUNT_POLICY 取值：
     DEFAULT_REMOVE_SOURCE=no
 
     # 挂载门禁策略: skip | fail | ignore
-    #   skip   : 未挂载 → 记警告跳过，不算失败（默认，适合 cron）
-    #   fail   : 未挂载 → 记失败，影响退出码
-    #   ignore : 完全不检查
     MOUNT_POLICY=skip
 
     # ============================================================
@@ -195,7 +191,6 @@ MOUNT_POLICY 取值：
     opts=--no-perms --chown=admin:users --update --delete-after
     delete=yes
     remove_source=no
-    # 挂载门禁：只有挂载为 gocryptfs 时才同步
     require_mount=yes
     mount_path=/srv/st1000dm/Work
     mount_fstype=fuse.gocryptfs
@@ -206,7 +201,6 @@ MOUNT_POLICY 取值：
     opts=--no-perms --chown=admin:users --update --delete-after
     delete=yes
     remove_source=no
-    # 挂载门禁：只有挂载为 gocryptfs 时才同步
     require_mount=yes
     mount_path=/srv/st1000dm/Work
     mount_fstype=fuse.gocryptfs
@@ -235,18 +229,15 @@ MOUNT_POLICY 取值：
     mount_path=/srv/st1000dm/test2.d
     mount_fstype=fuse.gocryptfs
 
----
+**特点**：
 
-### 典型配置二：LNAS → NAS（密文源）
+- 使用旧键 `require_mount` / `mount_path`（兼容写法）
+- 门禁模式：`require_mounted`（目标必须是已挂载的明文挂载点）
+- 源是明文，目标是已解密的 gocryptfs 挂载点
 
-场景：LNAS 上的 gocryptfs 底层密文目录，同步到 NAS 的 gocryptfs 底层。
+### 示例配置二：密文源 → 密文目录
 
-- 源：密文
-- 目标：gocryptfs 底层（不是挂载点）
-- 门禁：require_unmounted（目标明文挂载点必须未挂载）
-- 使用新键书写（require_unmounted / mount_point）
-
-文件名建议：config2.ini.example
+对应 `config2.ini.example`。源是 gocryptfs 底层密文目录，目标是另一个 gocryptfs 底层密文目录，使用新键 `require_unmounted` / `mount_point` 书写。
 
     # ============================================================
     # 备份配置文件示例
@@ -264,7 +255,7 @@ MOUNT_POLICY 取值：
     # 全局 rsync 默认选项（可被任务级 opts 追加覆盖）
     GLOBAL_OPTS=-avzhu --progress
 
-    # 提权选项，需要命令行中用--sudo 激活
+    # 提权选项，需要命令行中用 --sudo 激活
     RSYNC_PATH=sudo rsync
 
     # ============================================================
@@ -306,17 +297,30 @@ MOUNT_POLICY 取值：
     mount_point=/mnt/wd4000g/Work
     mount_fstype=fuse.gocryptfs
 
----
+**特点**：
 
-### 两份配置的差异
+- 使用新键 `require_unmounted` / `mount_point`
+- 门禁模式：`require_unmounted`（目标明文挂载点必须未挂载）
+- 源是密文，目标是 gocryptfs 底层密文目录
+- 前三个任务（Personal_Vault、Study、Life）未加密，不设门禁
 
-| 项 | 配置一 | 配置二 |
+### 两份示例的对比
+
+| 项 | 示例一（config1） | 示例二（config2） |
 |---|---|---|
-| 场景 | Office → LNAS | LNAS → NAS |
 | 源 | 明文目录 | 密文目录 |
-| 目标 | gocryptfs 挂载点 | gocryptfs 底层 |
-| 门禁 | require_mount=yes | require_unmounted=yes |
-| 键风格 | 旧键（兼容） | 新键 |
+| 目标 | 明文挂载点 | 密文目录 |
+| 门禁 | require_mount=yes（旧键） | require_unmounted=yes（新键） |
+| 键风格 | 兼容旧键 | 推荐新键 |
+| 典型任务 | task_alice、task_bob、task_charlie | task_Work_Cipher、task_infra_secrets_cipher |
+| 门禁判定 | 目标必须已挂载 | 目标必须未挂载 |
+
+### 使用示例配置
+
+    cp config1.ini.example config1.ini
+    vim config1.ini
+
+    rbackup-tui -c config1.ini -s rbackup.sh
 
 ---
 
@@ -327,14 +331,11 @@ MOUNT_POLICY 取值：
     # 默认读取 $HOME/rbackup/config.ini
     rbackup-tui
 
-    # 指定配置一（Office）
+    # 指定配置
     rbackup-tui -c ~/rbackup/config1.ini
 
-    # 指定配置二（LNAS）
-    rbackup-tui -c ~/rbackup/config2.ini
-
     # 指定脚本
-    rbackup-tui -c ~/rbackup/config2.ini -s ~/rbackup/rbackup.sh
+    rbackup-tui -c ~/rbackup/config1.ini -s ~/rbackup/rbackup.sh
 
 ### 命令行参数
 
@@ -422,6 +423,12 @@ MOUNT_POLICY 取值：
 
 配置示例：
 
+    require_mount=yes
+    mount_path=/srv/st1000dm/Work
+    mount_fstype=fuse.gocryptfs
+
+或新键写法：
+
     require_mounted=yes
     mount_point=/srv/st1000dm/Work
     mount_fstype=fuse.gocryptfs
@@ -472,7 +479,7 @@ Makefile 会自动注入版本：
                -X main.BuildTime=$(date +%Y-%m-%d) \
                -X main.GitCommit=$(git rev-parse --short HEAD)
 
-打 tag 后版本号会显示为 v0.2.0，未打 tag 显示 commit hash。
+打 tag 后版本号会显示为 v1.1.0，未打 tag 显示 commit hash。
 
 ---
 
@@ -512,7 +519,7 @@ MSYS2 + winpty 会吞掉 ESC。使用 q 或 Ctrl+C。
 
 ### rsync 输出没显示？
 
-do_backup 输出会有延迟，因为要先做挂载检查、目录检查。等待几秒。
+先做挂载检查和远端目录检查，输出有几秒延迟。等待即可。
 
 ### 日志目录不可写？
 
@@ -542,8 +549,9 @@ rbackup.sh 会自动回退到脚本同目录的 log/。
     ├── go.sum
     ├── Makefile
     ├── README.md
-    ├── config1.ini.example      示例：Office → LNAS（明文源）
-    ├── config2.ini.example      示例：LNAS → NAS（密文源）
+    ├── LICENSE
+    ├── config1.ini.example      示例一：明文源 → 明文挂载点
+    ├── config2.ini.example      示例二：密文源 → 密文目录
     └── bin/                     编译产物（不入库）
         ├── windows/
         └── linux/
@@ -561,3 +569,5 @@ Jet Locke
 MIT License
 
 Copyright (c) 2026 Jet Locke
+
+详见同目录 LICENSE 文件。
