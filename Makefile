@@ -39,8 +39,8 @@ endif
 TARGET := $(BUILD_DIR)/$(GOOS)/$(BIN)$(SUFFIX)
 
 # ---------- 发布 ----------
-REPO  ?= $(shell git remote get-url origin 2>/dev/null | \
-           sed -E 's|^.*[:/]||; s|\.git$$||')
+REPO ?= $(shell git remote get-url origin 2>/dev/null | head -n1 | \
+           sed -E 's|^[^:]+://[^/]+/||; s|^git@[^:]+:||; s|\.git$$||')
 NOTES ?= $(DIST_DIR)/RELEASE_NOTES.md
 
 # ============================================================
