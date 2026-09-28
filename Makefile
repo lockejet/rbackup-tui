@@ -23,7 +23,7 @@ PKG_VERSION  ?= $(VERSION)
 PKG_NAME     := rbackup-tui-$(PKG_VERSION)
 
 LDFLAGS := -X main.Version=$(BUILD_VERSION) \
-           -X main.BuildTime=$(date +%Y-%m-%d) \
+           -X main.BuildTime=$(shell date +%Y-%m-%d) \
            -X main.GitCommit=$(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 
 # ---------- 平台 ----------
@@ -40,7 +40,7 @@ TARGET := $(BUILD_DIR)/$(GOOS)/$(BIN)$(SUFFIX)
 
 # ---------- 发布 ----------
 REPO  ?= $(shell git remote get-url origin 2>/dev/null | \
-           sed -E 's|.*[:/]([^/]+/[^/]+?)(\.git)?$$|\1|')
+           sed -E 's|^.*[:/]||; s|\.git$$||')
 NOTES ?= $(DIST_DIR)/RELEASE_NOTES.md
 
 # ============================================================
@@ -85,6 +85,7 @@ package: package-linux package-linux-arm64 package-win
 	@ls -lh $(DIST_DIR)/
 
 package-linux: build-linux
+	@rm -f $(DIST_DIR)/$(BIN)-*-linux-amd64.tar.gz
 	@rm -rf $(STAGE_DIR)/$(BIN)-linux-amd64
 	@mkdir -p $(STAGE_DIR)/$(BIN)-linux-amd64 $(DIST_DIR)
 	@cp bin/linux/$(BIN) $(STAGE_DIR)/$(BIN)-linux-amd64/
@@ -97,6 +98,7 @@ package-linux: build-linux
 	@echo ">>> $(DIST_DIR)/$(PKG_NAME)-linux-amd64.tar.gz"
 
 package-linux-arm64: build-linux-arm64
+	@rm -f $(DIST_DIR)/$(BIN)-*-linux-arm64.tar.gz
 	@rm -rf $(STAGE_DIR)/$(BIN)-linux-arm64
 	@mkdir -p $(STAGE_DIR)/$(BIN)-linux-arm64 $(DIST_DIR)
 	@cp bin/linux/$(BIN)-arm64 $(STAGE_DIR)/$(BIN)-linux-arm64/$(BIN)
@@ -109,6 +111,7 @@ package-linux-arm64: build-linux-arm64
 	@echo ">>> $(DIST_DIR)/$(PKG_NAME)-linux-arm64.tar.gz"
 
 package-win: build-win
+	@rm -f $(DIST_DIR)/$(BIN)-*-windows-amd64.zip
 	@rm -rf $(STAGE_DIR)/$(BIN)-windows-amd64
 	@mkdir -p $(STAGE_DIR)/$(BIN)-windows-amd64 $(DIST_DIR)
 	@cp bin/windows/$(BIN).exe $(STAGE_DIR)/$(BIN)-windows-amd64/
@@ -122,7 +125,6 @@ package-win: build-win
 # 发布（GitHub Release）
 # ============================================================
 
-# 前置检查：gh 已安装、已登录、tag 存在、仓库可解析
 .PHONY: release-check
 release-check:
 	@command -v gh >/dev/null 2>&1 || { \
@@ -149,8 +151,6 @@ release-check:
 	@echo ">>> 仓库: $(REPO)"
 	@echo ">>> 版本: $(VERSION)"
 
-# 自动生成 release notes
-# 从上一个 tag 到当前 tag 之间的提交，格式为 "- <subject>"
 .PHONY: release-notes
 release-notes:
 	@mkdir -p $(DIST_DIR)
@@ -177,8 +177,6 @@ release-notes:
 	@echo "--- 结束 ---"
 	@echo ""
 
-# 打包 + 创建 Release + 上传附件
-# 不自动打 tag、不自动 push tag，由用户手动操作
 .PHONY: release
 release: release-check package release-notes
 	@echo ""
@@ -204,7 +202,6 @@ release: release-check package release-notes
 	@echo ">>> 发布完成"
 	@echo ">>> URL: $$(gh release view $(VERSION) --repo $(REPO) --json url --jq '.url')"
 
-# 只上传附件（Release 已存在时用，比如重新编译后）
 .PHONY: release-upload
 release-upload: release-check package
 	@echo ">>> 上传附件到 Release: $(VERSION)"
@@ -216,7 +213,6 @@ release-upload: release-check package
 	    --repo "$(REPO)"
 	@echo ">>> 上传完成"
 
-# 删除 Release（保留 tag）
 .PHONY: release-delete
 release-delete:
 	@[ -n "$(VERSION)" ] || { echo "错误: 请指定 VERSION"; exit 1; }
@@ -266,6 +262,7 @@ version:
 	@echo "PKG_VERSION   = $(PKG_VERSION)"
 	@echo "PKG_NAME      = $(PKG_NAME)"
 	@echo "REPO          = $(REPO)"
+	@echo "LDFLAGS       = $(LDFLAGS)"
 
 .PHONY: help
 help:
@@ -300,6 +297,6 @@ help:
 	@echo "  make help                本帮助"
 	@echo ""
 	@echo "发布参数:"
-	@echo "  VERSION=v1.1.2           指定版本（默认取 git 最近 tag）"
+	@echo "  VERSION=v1.1.3           指定版本（默认取 git 最近 tag）"
 	@echo "  NOTES=xxx.md             指定 notes 路径（默认 dist/RELEASE_NOTES.md）"
 	@echo "  REPO=user/repo           手动指定仓库（默认从 git remote 解析）"
