@@ -4,21 +4,26 @@
 
 BIN        := rbackup-tui
 BUILD_DIR  := bin
+DIST_DIR   := dist
+STAGE_DIR  := .staging
 
 # ---------- 安装路径 ----------
 PREFIX     ?= $(HOME)/.local
 BINDIR     ?= $(PREFIX)/bin
-CONFDIR    ?= $(HOME)/rbackup
-SCRIPT_SRC := $(HOME)/rbackup/rbackup.sh
 
-# ---------- 版本信息（来自 git） ----------
-VERSION    := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-BUILD_TIME := $(shell date +%Y-%m-%d)
-GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
+# ---------- 打包源文件 ----------
+SCRIPT_FILE  := rbackup.sh
+CONFIG_FILES := config1.ini.example config2.ini.example
+DOC_FILES    := README.md LICENSE
 
-LDFLAGS    := -X main.Version=$(VERSION) \
-              -X main.BuildTime=$(BUILD_TIME) \
-              -X main.GitCommit=$(GIT_COMMIT)
+# ---------- 版本 ----------
+BUILD_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+PKG_VERSION  ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
+PKG_NAME     := rbackup-tui-$(PKG_VERSION)
+
+LDFLAGS := -X main.Version=$(BUILD_VERSION) \
+           -X main.BuildTime=$(date +%Y-%m-%d) \
+           -X main.GitCommit=$(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 
 # ---------- 平台 ----------
 UNAME_S := $(shell uname -s)
@@ -40,7 +45,7 @@ TARGET := $(BUILD_DIR)/$(GOOS)/$(BIN)$(SUFFIX)
 build:
 	@mkdir -p $(BUILD_DIR)/$(GOOS)
 	go build -ldflags "$(LDFLAGS)" -o $(TARGET) .
-	@echo ">>> 版本: $(VERSION)  commit: $(GIT_COMMIT)  构建时间: $(BUILD_TIME)"
+	@echo ">>> $(TARGET)"
 
 .PHONY: build-win
 build-win:
@@ -64,6 +69,50 @@ build-linux-arm64:
 build-all: build-win build-linux build-linux-arm64
 
 # ============================================================
+# 打包（子目录方案）
+# ============================================================
+
+.PHONY: package package-linux package-linux-arm64 package-win
+package: package-linux package-linux-arm64 package-win
+	@echo ""
+	@echo ">>> 打包完成，产物在 $(DIST_DIR)/"
+	@ls -lh $(DIST_DIR)/
+
+package-linux: build-linux
+	@rm -rf $(STAGE_DIR)/$(BIN)-linux-amd64
+	@mkdir -p $(STAGE_DIR)/$(BIN)-linux-amd64 $(DIST_DIR)
+	@cp bin/linux/$(BIN) $(STAGE_DIR)/$(BIN)-linux-amd64/
+	@cp $(SCRIPT_FILE) $(STAGE_DIR)/$(BIN)-linux-amd64/
+	@cp $(CONFIG_FILES) $(STAGE_DIR)/$(BIN)-linux-amd64/
+	@cp $(DOC_FILES) $(STAGE_DIR)/$(BIN)-linux-amd64/
+	@chmod +x $(STAGE_DIR)/$(BIN)-linux-amd64/$(BIN)
+	@chmod +x $(STAGE_DIR)/$(BIN)-linux-amd64/$(SCRIPT_FILE)
+	@tar czf $(DIST_DIR)/$(PKG_NAME)-linux-amd64.tar.gz -C $(STAGE_DIR) $(BIN)-linux-amd64
+	@echo ">>> $(DIST_DIR)/$(PKG_NAME)-linux-amd64.tar.gz"
+
+package-linux-arm64: build-linux-arm64
+	@rm -rf $(STAGE_DIR)/$(BIN)-linux-arm64
+	@mkdir -p $(STAGE_DIR)/$(BIN)-linux-arm64 $(DIST_DIR)
+	@cp bin/linux/$(BIN)-arm64 $(STAGE_DIR)/$(BIN)-linux-arm64/$(BIN)
+	@cp $(SCRIPT_FILE) $(STAGE_DIR)/$(BIN)-linux-arm64/
+	@cp $(CONFIG_FILES) $(STAGE_DIR)/$(BIN)-linux-arm64/
+	@cp $(DOC_FILES) $(STAGE_DIR)/$(BIN)-linux-arm64/
+	@chmod +x $(STAGE_DIR)/$(BIN)-linux-arm64/$(BIN)
+	@chmod +x $(STAGE_DIR)/$(BIN)-linux-arm64/$(SCRIPT_FILE)
+	@tar czf $(DIST_DIR)/$(PKG_NAME)-linux-arm64.tar.gz -C $(STAGE_DIR) $(BIN)-linux-arm64
+	@echo ">>> $(DIST_DIR)/$(PKG_NAME)-linux-arm64.tar.gz"
+
+package-win: build-win
+	@rm -rf $(STAGE_DIR)/$(BIN)-windows-amd64
+	@mkdir -p $(STAGE_DIR)/$(BIN)-windows-amd64 $(DIST_DIR)
+	@cp bin/windows/$(BIN).exe $(STAGE_DIR)/$(BIN)-windows-amd64/
+	@cp $(SCRIPT_FILE) $(STAGE_DIR)/$(BIN)-windows-amd64/
+	@cp $(CONFIG_FILES) $(STAGE_DIR)/$(BIN)-windows-amd64/
+	@cp $(DOC_FILES) $(STAGE_DIR)/$(BIN)-windows-amd64/
+	@cd $(STAGE_DIR) && zip -qr ../$(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip $(BIN)-windows-amd64
+	@echo ">>> $(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip"
+
+# ============================================================
 # 安装 / 卸载
 # ============================================================
 
@@ -72,23 +121,28 @@ install: build
 	@echo ">>> 安装 $(BIN) 到 $(DESTDIR)$(BINDIR)/"
 	install -d "$(DESTDIR)$(BINDIR)"
 	install -m 0755 "$(TARGET)" "$(DESTDIR)$(BINDIR)/$(BIN)$(SUFFIX)"
-	@if [ -f "$(SCRIPT_SRC)" ]; then \
-		echo ">>> 安装 rbackup.sh 到 $(DESTDIR)$(BINDIR)/"; \
-		install -m 0755 "$(SCRIPT_SRC)" "$(DESTDIR)$(BINDIR)/rbackup.sh"; \
+	@if [ -f "$(SCRIPT_FILE)" ]; then \
+		install -m 0755 "$(SCRIPT_FILE)" "$(DESTDIR)$(BINDIR)/$(SCRIPT_FILE)"; \
 	fi
-	@echo ""
-	@echo "安装完成。版本 $(VERSION)"
+	@echo ">>> 安装完成"
 
 .PHONY: uninstall
 uninstall:
 	-rm -f "$(DESTDIR)$(BINDIR)/$(BIN)$(SUFFIX)"
 	-rm -f "$(DESTDIR)$(BINDIR)/$(BIN)"
-	-rm -f "$(DESTDIR)$(BINDIR)/rbackup.sh"
-	@echo "卸载完成。配置文件目录 $(CONFDIR) 未删除。"
+	-rm -f "$(DESTDIR)$(BINDIR)/$(SCRIPT_FILE)"
+	@echo ">>> 卸载完成（未删除配置目录）"
 
 # ============================================================
 # 其他
 # ============================================================
+
+.PHONY: check-clean
+check-clean:
+	@if ! git diff-index --quiet HEAD --; then \
+		echo "警告: 工作区有未提交改动"; \
+		git status --short; \
+	fi
 
 .PHONY: tidy
 tidy:
@@ -96,55 +150,36 @@ tidy:
 
 .PHONY: clean
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) $(DIST_DIR) $(STAGE_DIR)
 
 .PHONY: version
 version:
-	@echo "Version:    $(VERSION)"
-	@echo "Git commit: $(GIT_COMMIT)"
-	@echo "Build time: $(BUILD_TIME)"
+	@echo "Build version: $(BUILD_VERSION)"
+	@echo "Package version: $(PKG_VERSION)"
+	@echo "Git commit: $(LDFLAGS)"
 
 .PHONY: help
 help:
-	@echo "rbackup-tui 构建"
+	@echo "rbackup-tui 构建与打包"
 	@echo ""
-	@echo "  make build              编当前平台"
-	@echo "  make build-win          Windows"
-	@echo "  make build-linux        Linux amd64"
-	@echo "  make build-linux-arm64  Linux arm64"
-	@echo "  make build-all          全部"
+	@echo "构建:"
+	@echo "  make build               编当前平台"
+	@echo "  make build-win           Windows exe"
+	@echo "  make build-linux         Linux amd64"
+	@echo "  make build-linux-arm64   Linux arm64"
+	@echo "  make build-all           全部"
 	@echo ""
-	@echo "  make install            安装到 $(PREFIX)"
-	@echo "  make uninstall          卸载"
-	@echo "  make version            显示版本"
-	@echo "  make clean              清空 bin/"
-
-# ---------- 打包 ----------
-VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
-DIST_DIR := dist
-PKG_NAME := rbackup-tui-$(VERSION)
-
-.PHONY: package package-linux package-linux-arm64 package-win
-package: package-linux package-linux-arm64 package-win
-	@echo ">>> 打包完成，产物在 $(DIST_DIR)/"
-
-package-linux: build-linux
-	@mkdir -p $(DIST_DIR)
-	@tar czf $(DIST_DIR)/$(PKG_NAME)-linux-amd64.tar.gz \
-	    -C bin/linux rbackup-tui
-	@echo ">>> $(DIST_DIR)/$(PKG_NAME)-linux-amd64.tar.gz"
-
-package-linux-arm64: build-linux-arm64
-	@mkdir -p $(DIST_DIR)
-	@tar czf $(DIST_DIR)/$(PKG_NAME)-linux-arm64.tar.gz \
-	    -C bin/linux rbackup-tui-arm64
-	@echo ">>> $(DIST_DIR)/$(PKG_NAME)-linux-arm64.tar.gz"
-
-package-win: build-win
-	@mkdir -p $(DIST_DIR)
-	@cd bin/windows && zip -q ../../$(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip rbackup-tui.exe
-	@echo ">>> $(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip"
-
-.PHONY: clean-dist
-clean-dist:
-	rm -rf $(DIST_DIR)
+	@echo "打包（生成 tar.gz / zip）:"
+	@echo "  make package             全部平台"
+	@echo "  make package-linux       仅 Linux amd64"
+	@echo "  make package-linux-arm64 仅 Linux arm64"
+	@echo "  make package-win         仅 Windows amd64"
+	@echo ""
+	@echo "安装:"
+	@echo "  make install             装到 $(PREFIX)"
+	@echo "  make uninstall           卸载"
+	@echo ""
+	@echo "其他:"
+	@echo "  make clean               清空 bin/ dist/ .staging/"
+	@echo "  make version             显示版本"
+	@echo "  make help                本帮助"

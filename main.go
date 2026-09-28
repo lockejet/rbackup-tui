@@ -182,20 +182,41 @@ func findScriptPath() string {
 	if p := os.Getenv("RBACKUP_SCRIPT"); p != "" {
 		return p
 	}
+
+	// 1. 二进制同目录（release 包解压场景）
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		for _, name := range []string{"rbackup.sh", "rbackup"} {
+			p := filepath.Join(exeDir, name)
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+	}
+
+	// 2. 用户主目录
 	home, _ := os.UserHomeDir()
 	candidates := []string{
 		filepath.Join(home, "rbackup", "rbackup.sh"),
 		filepath.Join(home, ".local", "bin", "rbackup"),
+		filepath.Join(home, ".local", "bin", "rbackup.sh"),
 	}
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
 			return c
 		}
 	}
+
+	// 3. PATH
+	if p, err := exec.LookPath("rbackup.sh"); err == nil {
+		return p
+	}
 	if p, err := exec.LookPath("rbackup"); err == nil {
 		return p
 	}
-	return "rbackup"
+
+	// 4. 找不到，返回空，由 main 报错
+	return ""
 }
 
 func findConfigPath() string {
@@ -1860,6 +1881,21 @@ func (a *App) runMountCheck() {
 // ---------- 重载 ----------
 
 func (a *App) reloadConfig() {
+	if a.scriptPath == "" {
+		fmt.Fprintln(os.Stderr, "错误：找不到 rbackup.sh")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "请按以下方式之一指定：")
+		fmt.Fprintln(os.Stderr, "  1. 命令行: rbackup-tui -s /path/to/rbackup.sh")
+		fmt.Fprintln(os.Stderr, "  2. 环境变量: export RBACKUP_SCRIPT=/path/to/rbackup.sh")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "查找过的位置：")
+		fmt.Fprintln(os.Stderr, "  <二进制同目录>/rbackup.sh")
+		fmt.Fprintln(os.Stderr, "  $HOME/rbackup/rbackup.sh")
+		fmt.Fprintln(os.Stderr, "  $HOME/.local/bin/rbackup")
+		fmt.Fprintln(os.Stderr, "  $HOME/.local/bin/rbackup.sh")
+		fmt.Fprintln(os.Stderr, "  PATH 中的 rbackup.sh / rbackup")
+		os.Exit(1)
+	}
 	cfg, err := ParseConfig(a.configPath)
 	if err != nil {
 		a.setStatus(fmt.Sprintf("[red]重新加载失败: %v[-]", err))

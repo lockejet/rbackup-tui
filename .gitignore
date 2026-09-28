@@ -1,18 +1,26 @@
-log/
-backup/
-rbackup.d/
-rbackup-tui.d/
-*.log
+# 编译产物
 /bin/
 /dist/
-#rbackup-tui
-#rbackup-tui.exe
+/.staging/
+
+# 真实配置
 config.ini
 config-office.ini
 config-lnas.ini
 config-*.ini
 !config*.ini.example
+
+# 日志
+*.log
+/log/
+
+# 备份
+/backup/
+/rbackup.d/
+/rbackup-tui.d/
+
+# 编辑器
 *.swp
+*.save
 .vscode/
 .idea/
-*.save
