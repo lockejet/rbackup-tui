@@ -18,7 +18,8 @@ DOC_FILES    := README.md LICENSE
 
 # ---------- 版本 ----------
 BUILD_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-PKG_VERSION  ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
+VERSION      ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
+PKG_VERSION  ?= $(VERSION)
 PKG_NAME     := rbackup-tui-$(PKG_VERSION)
 
 LDFLAGS := -X main.Version=$(BUILD_VERSION) \
@@ -36,6 +37,11 @@ else
 endif
 
 TARGET := $(BUILD_DIR)/$(GOOS)/$(BIN)$(SUFFIX)
+
+# ---------- 发布 ----------
+REPO  ?= $(shell git remote get-url origin 2>/dev/null | \
+           sed -E 's|.*[:/]([^/]+/[^/]+?)(\.git)?$$|\1|')
+NOTES ?= $(DIST_DIR)/RELEASE_NOTES.md
 
 # ============================================================
 # 构建
@@ -69,7 +75,7 @@ build-linux-arm64:
 build-all: build-win build-linux build-linux-arm64
 
 # ============================================================
-# 打包（子目录方案）
+# 打包
 # ============================================================
 
 .PHONY: package package-linux package-linux-arm64 package-win
@@ -113,6 +119,114 @@ package-win: build-win
 	@echo ">>> $(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip"
 
 # ============================================================
+# 发布（GitHub Release）
+# ============================================================
+
+# 前置检查：gh 已安装、已登录、tag 存在、仓库可解析
+.PHONY: release-check
+release-check:
+	@command -v gh >/dev/null 2>&1 || { \
+		echo "错误: 未安装 gh CLI"; \
+		echo "安装: https://cli.github.com/"; \
+		exit 1; \
+	}
+	@gh auth status >/dev/null 2>&1 || { \
+		echo "错误: gh 未登录"; \
+		echo "运行: gh auth login"; \
+		exit 1; \
+	}
+	@[ -n "$(REPO)" ] || { \
+		echo "错误: 无法从 git remote 解析仓库"; \
+		echo "请检查: git remote -v"; \
+		exit 1; \
+	}
+	@git rev-parse "$(VERSION)" >/dev/null 2>&1 || { \
+		echo "错误: tag '$(VERSION)' 不存在"; \
+		echo "先打 tag: git tag -a $(VERSION) -m '...'"; \
+		echo "然后推送: git push origin $(VERSION)"; \
+		exit 1; \
+	}
+	@echo ">>> 仓库: $(REPO)"
+	@echo ">>> 版本: $(VERSION)"
+
+# 自动生成 release notes
+# 从上一个 tag 到当前 tag 之间的提交，格式为 "- <subject>"
+.PHONY: release-notes
+release-notes:
+	@mkdir -p $(DIST_DIR)
+	@echo ">>> 生成 $(NOTES)"
+	@PREV_TAG=$$(git describe --tags --abbrev=0 "$(VERSION)^" 2>/dev/null || echo ""); \
+	if [ -z "$$PREV_TAG" ]; then \
+		echo "## $(VERSION)" > "$(NOTES)"; \
+		echo "" >> "$(NOTES)"; \
+		echo "首个发布版本。" >> "$(NOTES)"; \
+		echo "" >> "$(NOTES)"; \
+		echo "### 提交列表" >> "$(NOTES)"; \
+		echo "" >> "$(NOTES)"; \
+		git log --pretty="- %s" "$(VERSION)" >> "$(NOTES)"; \
+	else \
+		echo "## $(VERSION)" > "$(NOTES)"; \
+		echo "" >> "$(NOTES)"; \
+		echo "自 $$PREV_TAG 以来的改动：" >> "$(NOTES)"; \
+		echo "" >> "$(NOTES)"; \
+		git log --pretty="- %s" "$$PREV_TAG..$(VERSION)" >> "$(NOTES)"; \
+	fi
+	@echo ""
+	@echo "--- $(NOTES) 内容 ---"
+	@cat "$(NOTES)"
+	@echo "--- 结束 ---"
+	@echo ""
+
+# 打包 + 创建 Release + 上传附件
+# 不自动打 tag、不自动 push tag，由用户手动操作
+.PHONY: release
+release: release-check package release-notes
+	@echo ""
+	@echo ">>> 创建 GitHub Release: $(VERSION)"
+	@if gh release view "$(VERSION)" --repo "$(REPO)" >/dev/null 2>&1; then \
+		echo ">>> Release $(VERSION) 已存在，只上传附件（--clobber 覆盖同名）"; \
+		gh release upload "$(VERSION)" \
+		    $(DIST_DIR)/$(PKG_NAME)-linux-amd64.tar.gz \
+		    $(DIST_DIR)/$(PKG_NAME)-linux-arm64.tar.gz \
+		    $(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip \
+		    --clobber \
+		    --repo "$(REPO)"; \
+	else \
+		gh release create "$(VERSION)" \
+		    $(DIST_DIR)/$(PKG_NAME)-linux-amd64.tar.gz \
+		    $(DIST_DIR)/$(PKG_NAME)-linux-arm64.tar.gz \
+		    $(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip \
+		    --title "$(VERSION)" \
+		    --notes-file "$(NOTES)" \
+		    --repo "$(REPO)"; \
+	fi
+	@echo ""
+	@echo ">>> 发布完成"
+	@echo ">>> URL: $$(gh release view $(VERSION) --repo $(REPO) --json url --jq '.url')"
+
+# 只上传附件（Release 已存在时用，比如重新编译后）
+.PHONY: release-upload
+release-upload: release-check package
+	@echo ">>> 上传附件到 Release: $(VERSION)"
+	@gh release upload "$(VERSION)" \
+	    $(DIST_DIR)/$(PKG_NAME)-linux-amd64.tar.gz \
+	    $(DIST_DIR)/$(PKG_NAME)-linux-arm64.tar.gz \
+	    $(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip \
+	    --clobber \
+	    --repo "$(REPO)"
+	@echo ">>> 上传完成"
+
+# 删除 Release（保留 tag）
+.PHONY: release-delete
+release-delete:
+	@[ -n "$(VERSION)" ] || { echo "错误: 请指定 VERSION"; exit 1; }
+	@[ -n "$(REPO)" ] || { echo "错误: 请指定 REPO"; exit 1; }
+	@echo ">>> 删除 Release: $(VERSION) ($(REPO))"
+	@gh release delete "$(VERSION)" --yes --repo "$(REPO)" || \
+		echo ">>> Release 不存在或删除失败"
+	@echo ">>> 已删除（tag 保留）"
+
+# ============================================================
 # 安装 / 卸载
 # ============================================================
 
@@ -137,13 +251,6 @@ uninstall:
 # 其他
 # ============================================================
 
-.PHONY: check-clean
-check-clean:
-	@if ! git diff-index --quiet HEAD --; then \
-		echo "警告: 工作区有未提交改动"; \
-		git status --short; \
-	fi
-
 .PHONY: tidy
 tidy:
 	go mod tidy
@@ -154,13 +261,15 @@ clean:
 
 .PHONY: version
 version:
-	@echo "Build version: $(BUILD_VERSION)"
-	@echo "Package version: $(PKG_VERSION)"
-	@echo "Git commit: $(LDFLAGS)"
+	@echo "BUILD_VERSION = $(BUILD_VERSION)"
+	@echo "VERSION       = $(VERSION)"
+	@echo "PKG_VERSION   = $(PKG_VERSION)"
+	@echo "PKG_NAME      = $(PKG_NAME)"
+	@echo "REPO          = $(REPO)"
 
 .PHONY: help
 help:
-	@echo "rbackup-tui 构建与打包"
+	@echo "rbackup-tui 构建与发布"
 	@echo ""
 	@echo "构建:"
 	@echo "  make build               编当前平台"
@@ -169,11 +278,17 @@ help:
 	@echo "  make build-linux-arm64   Linux arm64"
 	@echo "  make build-all           全部"
 	@echo ""
-	@echo "打包（生成 tar.gz / zip）:"
-	@echo "  make package             全部平台"
+	@echo "打包:"
+	@echo "  make package             全部平台（生成 dist/*.tar.gz / *.zip）"
 	@echo "  make package-linux       仅 Linux amd64"
 	@echo "  make package-linux-arm64 仅 Linux arm64"
 	@echo "  make package-win         仅 Windows amd64"
+	@echo ""
+	@echo "发布（GitHub Release）:"
+	@echo "  make release             打包 + 创建 Release + 上传附件"
+	@echo "  make release-upload      只上传附件"
+	@echo "  make release-notes       只生成 notes 文件"
+	@echo "  make release-delete      删除 Release（保留 tag）"
 	@echo ""
 	@echo "安装:"
 	@echo "  make install             装到 $(PREFIX)"
@@ -181,5 +296,10 @@ help:
 	@echo ""
 	@echo "其他:"
 	@echo "  make clean               清空 bin/ dist/ .staging/"
-	@echo "  make version             显示版本"
+	@echo "  make version             显示版本信息"
 	@echo "  make help                本帮助"
+	@echo ""
+	@echo "发布参数:"
+	@echo "  VERSION=v1.1.2           指定版本（默认取 git 最近 tag）"
+	@echo "  NOTES=xxx.md             指定 notes 路径（默认 dist/RELEASE_NOTES.md）"
+	@echo "  REPO=user/repo           手动指定仓库（默认从 git remote 解析）"
