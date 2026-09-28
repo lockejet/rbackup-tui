@@ -61,6 +61,62 @@ func isDuplicateKey(event *tcell.EventKey) bool {
 	return dup
 }
 
+// ---------- 时长 / 字节格式化 ----------
+func formatDuration(d time.Duration) string {
+	totalSec := int(d.Seconds())
+	if totalSec < 0 {
+		totalSec = 0
+	}
+	if totalSec < 60 {
+		return fmt.Sprintf("%d秒", totalSec)
+	}
+	return fmt.Sprintf("%d分%d秒", totalSec/60, totalSec%60)
+}
+
+func formatBytes(b int64) string {
+	if b < 1024 {
+		return fmt.Sprintf("%dB", b)
+	}
+	if b < 1024*1024 {
+		return fmt.Sprintf("%.2fK", float64(b)/1024)
+	}
+	if b < 1024*1024*1024 {
+		return fmt.Sprintf("%.2fM", float64(b)/(1024*1024))
+	}
+	return fmt.Sprintf("%.2fG", float64(b)/(1024*1024*1024))
+}
+
+// 将 $HOME 前缀替换为 ~
+func shortenPath(p string) string {
+	if p == "" {
+		return p
+	}
+	home, _ := os.UserHomeDir()
+	if home == "" {
+		return p
+	}
+	if p == home {
+		return "~"
+	}
+	if strings.HasPrefix(p, home+string(filepath.Separator)) {
+		return "~" + p[len(home):]
+	}
+	return p
+}
+
+// 挂载策略的中文描述
+func policyDesc(policy string) string {
+	switch policy {
+	case "skip":
+		return "门禁失败时跳过"
+	case "fail":
+		return "门禁失败时任务失败"
+	case "ignore":
+		return "不检查门禁"
+	}
+	return policy
+}
+
 // ---------- 按键提示构造 ----------
 
 func hint(pairs ...string) string {
@@ -215,7 +271,6 @@ func findScriptPath() string {
 		return p
 	}
 
-	// 4. 找不到，返回空，由 main 报错
 	return ""
 }
 
@@ -246,6 +301,18 @@ func NewApp() *App {
 		}
 	}
 
+	// 转绝对路径，避免后续 filepath.Dir 得到相对路径
+	if configPath != "" {
+		if abs, err := filepath.Abs(configPath); err == nil {
+			configPath = abs
+		}
+	}
+	if scriptPath != "" {
+		if abs, err := filepath.Abs(scriptPath); err == nil {
+			scriptPath = abs
+		}
+	}
+
 	return &App{
 		app:           tview.NewApplication(),
 		configPath:    configPath,
@@ -253,6 +320,37 @@ func NewApp() *App {
 		focusArea:     "table",
 		interactState: InteractIdle,
 	}
+}
+
+// ---------- 日志目录回退检测 ----------
+func dirWritable(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return false
+	}
+	test := filepath.Join(dir, fmt.Sprintf(".rbackup_test_%d", os.Getpid()))
+	f, err := os.Create(test)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	os.Remove(test)
+	return true
+}
+
+func resolveLogDir(cfgLogDir, scriptPath string) string {
+	if dirWritable(cfgLogDir) {
+		return cfgLogDir
+	}
+	if scriptPath != "" {
+		fallback := filepath.Join(filepath.Dir(scriptPath), "log")
+		if dirWritable(fallback) {
+			return fallback
+		}
+	}
+	return cfgLogDir
 }
 
 // ---------- 分隔线 ----------
@@ -360,7 +458,6 @@ func (a *App) updateTableFooter() {
 	}
 	total := len(a.cfg.Tasks)
 
-	// 第 1 行：任务数 + 已选择
 	var line1 string
 	if len(selected) == 0 {
 		if focused {
@@ -379,41 +476,31 @@ func (a *App) updateTableFooter() {
 		}
 	}
 
-	// 第 2 行：操作键
-	var opsStr string
+	var opsStr, navStr string
 	if focused {
 		opsStr = hint(
 			"选择", "空格", "全选", "a", "全不选", "n",
 			"运行", "Enter", "预览", "d", "挂载", "m", "刷新", "r")
-	} else {
-		opsStr = hintDark(
-			"选择", "空格", "全选", "a", "全不选", "n",
-			"运行", "Enter", "预览", "d", "挂载", "m", "刷新", "r")
-	}
-
-	// 第 3 行：导航键
-	var navStr string
-	if focused {
 		navStr = hint(
 			"移动", "↑↓/j/k", "翻页", "PgUp/PgDn",
 			"首尾", "Home/End/g/G")
 	} else {
+		opsStr = hintDark(
+			"选择", "空格", "全选", "a", "全不选", "n",
+			"运行", "Enter", "预览", "d", "挂载", "m", "刷新", "r")
 		navStr = hintDark(
 			"移动", "↑↓/j/k", "翻页", "PgUp/PgDn",
 			"首尾", "Home/End/g/G")
 	}
 
-	// 第 4 行：等效命令（1 行，超出截断）
 	var cmdLine string
 	row, _ := a.table.GetSelection()
 	if row > 0 && row <= len(a.cfg.Tasks) {
-		cmd := a.buildRsyncCommand(a.cfg.Tasks[row-1])
-		cmdLine = cmd
+		cmdLine = a.buildRsyncCommand(a.cfg.Tasks[row-1])
 	}
 	if cmdLine == "" {
 		cmdLine = "(未选择任务)"
 	}
-	// 截断到 120 字符
 	if len(cmdLine) > 120 {
 		cmdLine = cmdLine[:117] + "..."
 	}
@@ -439,7 +526,6 @@ func (a *App) updateTableFooter() {
 	a.tableFooter.SetText(b.String())
 }
 
-// buildRsyncCommand 生成等效 rsync 命令
 func (a *App) buildRsyncCommand(t *Task) string {
 	if t == nil {
 		return ""
@@ -609,7 +695,7 @@ func debugKey(scope string, event *tcell.EventKey) {
 
 var filterPrefixes = []string{
 	"备份脚本启动 (PID:", "脚本路径:", "配置文件:", "远程主机:",
-	"日志文件:", "挂载门禁:", "任务选择:", "强制模式:", "提权已启用:",
+	"日志文件:", "统计文件:", "挂载门禁:", "任务选择:", "强制模式:", "提权已启用:",
 	"模式: 任务模式", "模式: 临时任务", "模式: 仅挂载检查",
 	"[CHECK-MOUNT]", "[DRY-RUN]", "汇总:", "跳过 0", "失败 0", "挂载门禁失败 0",
 }
@@ -1115,20 +1201,31 @@ func (a *App) togglePause() {
 // ---------- 状态刷新 ----------
 
 func (a *App) updateHeader() {
-	logPath := filepath.Join(a.cfg.Global.LogDir,
-		"rbackup_"+time.Now().Format("20060102")+".log")
+	logDir := resolveLogDir(a.cfg.Global.LogDir, a.scriptPath)
+	base := "rbackup_" + time.Now().Format("20060102_1504")
+	logPath := filepath.Join(logDir, base+".log")
+	statsPath := filepath.Join(logDir, base+".stats")
+
 	sshUser := a.cfg.Global.SSHUser
 	if sshUser == "" {
 		sshUser = "admin"
 	}
+
+	policy := a.cfg.Global.MountPolicy
+
 	txt := fmt.Sprintf(
-		"[yellow]脚本:[-] %s  [gray]|[-]  [yellow]配置:[-] %s\n"+
-			"[yellow]远端:[-] %s@%s:%s  [gray]|[-]  [yellow]策略:[-] %s  [gray]|[-]  [yellow]日志:[-] %s",
-		a.scriptPath,
-		a.configPath,
+		"[yellow]脚本:[-] %s  [gray]|[-]  "+
+			"[yellow]配置:[-] %s  [gray]|[-]  "+
+			"[yellow]策略:[-] %s（%s）\n"+
+			"[yellow]远端:[-] %s@%s:%s  [gray]|[-]  "+
+			"[yellow]日志:[-] %s  [gray]|[-]  "+
+			"[yellow]统计:[-] %s",
+		shortenPath(a.scriptPath),
+		shortenPath(a.configPath),
+		policy, policyDesc(policy),
 		sshUser, a.cfg.Global.Host, a.cfg.Global.SSHPort,
-		a.cfg.Global.MountPolicy,
-		logPath)
+		shortenPath(logPath),
+		shortenPath(statsPath))
 	a.header.SetText(txt)
 }
 
@@ -1584,7 +1681,7 @@ func (a *App) startRun(tasks []*Task, dryRun bool) {
 	fmt.Fprintln(a.logPart, tview.Escape("  - 远端父目录检查"))
 	fmt.Fprintln(a.logPart, tview.Escape("  - 创建远端目标目录"))
 	fmt.Fprintln(a.logPart, "")
-	fmt.Fprintln(a.logPart, tview.Escape("以上步骤可能需要几秒，请稍候..."))
+	fmt.Fprintln(a.logPart, tview.Escape("以上步骤可能需要数十秒，请稍候..."))
 	fmt.Fprintln(a.logPart, "")
 
 	a.setFocus("interact")
@@ -1602,13 +1699,22 @@ func (a *App) doRun(ctx context.Context, tasks []*Task, dryRun bool, mode string
 		})
 	}()
 
+	runStart := time.Now()
+
 	success, failed, skipped, mountFailed := 0, 0, 0, 0
 	total := len(tasks)
 	outcomes := make([]taskOutcome, 0, total)
 	cancelled := false
 
+	// 累计统计（只累加成功任务）
+	var cumFilesXfer, cumFilesTotal int
+	var cumBytesTotal, cumBytesSent, cumBytesRecv int64
+	var cumRsyncMS, cumListMS int64
+
 	for i, t := range tasks {
 		i, t := i, t
+
+		taskStart := time.Now()
 
 		a.errMu.Lock()
 		a.currentErrors = nil
@@ -1621,9 +1727,12 @@ func (a *App) doRun(ctx context.Context, tasks []*Task, dryRun bool, mode string
 					"[yellow]进度:[-] %d/%d    "+
 					"[yellow]当前:[-] %s    "+
 					"[green]成功 %d[-]  [yellow]跳过 %d[-]  "+
-					"[red]失败 %d[-]  [orange]挂载门禁失败 %d[-]",
+					"[red]失败 %d[-]  [orange]挂载门禁失败 %d[-]    "+
+					"[gray]累计: %s / %s[-]",
 				mode, i+1, total, t.Name,
-				success, skipped, failed, mountFailed))
+				success, skipped, failed, mountFailed,
+				formatDuration(time.Duration(cumRsyncMS)*time.Millisecond),
+				formatBytes(cumBytesTotal)))
 			a.updateStatus()
 		})
 
@@ -1633,6 +1742,8 @@ func (a *App) doRun(ctx context.Context, tasks []*Task, dryRun bool, mode string
 		} else {
 			res = StreamTask(ctx, a.scriptPath, a.configPath, t.Name, a.outputLine)
 		}
+
+		taskDuration := formatDuration(time.Since(taskStart))
 
 		var result string
 		switch {
@@ -1654,6 +1765,17 @@ func (a *App) doRun(ctx context.Context, tasks []*Task, dryRun bool, mode string
 		}
 		outcomes = append(outcomes, taskOutcome{Name: t.Name, Result: result})
 
+		// 累计（只累加成功任务）
+		if res.ExitCode == 0 && res.Stats != nil {
+			cumFilesXfer += res.Stats.FilesTransferred
+			cumFilesTotal += res.Stats.FilesTotal
+			cumBytesTotal += res.Stats.BytesTotal
+			cumBytesSent += res.Stats.BytesSent
+			cumBytesRecv += res.Stats.BytesReceived
+			cumRsyncMS += res.Stats.RsyncMS
+			cumListMS += res.Stats.ListMS
+		}
+
 		a.errMu.Lock()
 		errs := append([]string(nil), a.currentErrors...)
 		a.currentErrors = nil
@@ -1673,11 +1795,30 @@ func (a *App) doRun(ctx context.Context, tasks []*Task, dryRun bool, mode string
 			}
 			fmt.Fprintf(a.logPart,
 				"\n[cyan]>>> [%d/%d] %s %s[-]    "+
+					"[gray]用时:[-] %s    "+
 					"[gray]累积:[-] "+
 					"[green]成功 %d[-]  [yellow]跳过 %d[-]  "+
 					"[red]失败 %d[-]  [orange]挂载门禁失败 %d[-]\n",
-				i+1, total, t.Name, color,
+				i+1, total, t.Name, color, taskDuration,
 				success, skipped, failed, mountFailed)
+
+			// 任务详情（来自 [STATS]）
+			if res.Stats != nil && res.ExitCode == 0 {
+				fmt.Fprintf(a.logPart,
+					"[gray]      文件: %d / %d    总大小: %s[-]\n",
+					res.Stats.FilesTransferred, res.Stats.FilesTotal,
+					formatBytes(res.Stats.BytesTotal))
+				fmt.Fprintf(a.logPart,
+					"[gray]      数据: 发送 %s + 接收 %s    rsync: %s[-]\n",
+					formatBytes(res.Stats.BytesSent),
+					formatBytes(res.Stats.BytesReceived),
+					formatDuration(time.Duration(res.Stats.RsyncMS)*time.Millisecond))
+				if res.Stats.ListMS > 0 {
+					fmt.Fprintf(a.logPart,
+						"[gray]      列表: 生成耗时 %s[-]\n",
+						formatDuration(time.Duration(res.Stats.ListMS)*time.Millisecond))
+				}
+			}
 
 			if len(errs) > 0 {
 				max := 5
@@ -1711,6 +1852,8 @@ func (a *App) doRun(ctx context.Context, tasks []*Task, dryRun bool, mode string
 
 finish:
 	a.app.QueueUpdateDraw(func() {
+		runDuration := formatDuration(time.Since(runStart))
+
 		var notRun []string
 		if cancelled {
 			done := len(outcomes)
@@ -1727,10 +1870,12 @@ finish:
 			"[cyan]════════════════════════════════════════════════════════[-]")
 		if cancelled {
 			fmt.Fprintf(a.logPart,
-				" [yellow][%s] 运行被取消[-]\n", time.Now().Format("15:04:05"))
+				" [yellow][%s] 运行被取消（总用时 %s）[-]\n",
+				time.Now().Format("15:04:05"), runDuration)
 		} else {
 			fmt.Fprintf(a.logPart,
-				" [green][%s] 全部任务完成[-]\n", time.Now().Format("15:04:05"))
+				" [green][%s] 全部任务完成（总用时 %s）[-]\n",
+				time.Now().Format("15:04:05"), runDuration)
 		}
 
 		var sName, skName, fName, mName []string
@@ -1750,30 +1895,52 @@ finish:
 			fmt.Fprintf(a.logPart, " [green]成功 %d: %s[-]\n",
 				len(sName), strings.Join(sName, " "))
 		} else {
-			fmt.Fprintln(a.logPart, " [gray]成功 0[-]")
+			fmt.Fprintln(a.logPart, " [green]成功 0[-]")
 		}
 		if len(skName) > 0 {
 			fmt.Fprintf(a.logPart, " [yellow]跳过 %d: %s[-]\n",
 				len(skName), strings.Join(skName, " "))
 		} else {
-			fmt.Fprintln(a.logPart, " [gray]跳过 0[-]")
+			fmt.Fprintln(a.logPart, " [yellow]跳过 0[-]")
 		}
 		if len(fName) > 0 {
 			fmt.Fprintf(a.logPart, " [red]失败 %d: %s[-]\n",
 				len(fName), strings.Join(fName, " "))
 		} else {
-			fmt.Fprintln(a.logPart, " [gray]失败 0[-]")
+			fmt.Fprintln(a.logPart, " [red]失败 0[-]")
 		}
 		if len(mName) > 0 {
 			fmt.Fprintf(a.logPart, " [orange]挂载门禁失败 %d: %s[-]\n",
 				len(mName), strings.Join(mName, " "))
 		} else {
-			fmt.Fprintln(a.logPart, " [gray]挂载门禁失败 0[-]")
+			fmt.Fprintln(a.logPart, " [orange]挂载门禁失败 0[-]")
 		}
 		if len(notRun) > 0 {
 			fmt.Fprintf(a.logPart, " [gray]未执行 %d: %s[-]\n",
 				len(notRun), strings.Join(notRun, " "))
 		}
+
+		// 传输统计
+		if cumFilesTotal > 0 || cumBytesSent > 0 {
+			fmt.Fprintln(a.logPart, "")
+			fmt.Fprintln(a.logPart, " [cyan]传输统计:[-]")
+			fmt.Fprintf(a.logPart, "   [gray]文件:   %d / %d[-]\n",
+				cumFilesXfer, cumFilesTotal)
+			fmt.Fprintf(a.logPart, "   [gray]总大小: %s[-]\n",
+				formatBytes(cumBytesTotal))
+			fmt.Fprintf(a.logPart, "   [gray]数据:   发送 %s + 接收 %s[-]\n",
+				formatBytes(cumBytesSent), formatBytes(cumBytesRecv))
+			if cumRsyncMS > 0 {
+				rate := float64(cumBytesSent+cumBytesRecv) / 1024 / (float64(cumRsyncMS) / 1000)
+				fmt.Fprintf(a.logPart, "   [gray]速率:   平均 %.2f KB/s[-]\n", rate)
+			}
+			if cumListMS > 0 {
+				fmt.Fprintf(a.logPart, "   [gray]列表:   累计生成耗时 %s[-]\n",
+					formatDuration(time.Duration(cumListMS)*time.Millisecond))
+			}
+		}
+
+		fmt.Fprintf(a.logPart, " [cyan]总用时: %s[-]\n", runDuration)
 		fmt.Fprintln(a.logPart,
 			"[cyan]════════════════════════════════════════════════════════[-]")
 		a.logPart.ScrollToEnd()
@@ -1782,14 +1949,16 @@ finish:
 			a.statusPart.SetText(fmt.Sprintf(
 				"[yellow]运行被取消[-]  "+
 					"[green]成功 %d[-]  [yellow]跳过 %d[-]  "+
-					"[red]失败 %d[-]  [orange]挂载门禁失败 %d[-]",
-				success, skipped, failed, mountFailed))
+					"[red]失败 %d[-]  [orange]挂载门禁失败 %d[-]  "+
+					"[cyan]用时 %s[-]",
+				success, skipped, failed, mountFailed, runDuration))
 		} else {
 			a.statusPart.SetText(fmt.Sprintf(
 				"[green]运行完成[-]  "+
 					"[green]成功 %d[-]  [yellow]跳过 %d[-]  "+
-					"[red]失败 %d[-]  [orange]挂载门禁失败 %d[-]",
-				success, skipped, failed, mountFailed))
+					"[red]失败 %d[-]  [orange]挂载门禁失败 %d[-]  "+
+					"[cyan]用时 %s[-]",
+				success, skipped, failed, mountFailed, runDuration))
 		}
 		a.updateStatus()
 		a.updateHelp()
@@ -1881,21 +2050,6 @@ func (a *App) runMountCheck() {
 // ---------- 重载 ----------
 
 func (a *App) reloadConfig() {
-	if a.scriptPath == "" {
-		fmt.Fprintln(os.Stderr, "错误：找不到 rbackup.sh")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "请按以下方式之一指定：")
-		fmt.Fprintln(os.Stderr, "  1. 命令行: rbackup-tui -s /path/to/rbackup.sh")
-		fmt.Fprintln(os.Stderr, "  2. 环境变量: export RBACKUP_SCRIPT=/path/to/rbackup.sh")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "查找过的位置：")
-		fmt.Fprintln(os.Stderr, "  <二进制同目录>/rbackup.sh")
-		fmt.Fprintln(os.Stderr, "  $HOME/rbackup/rbackup.sh")
-		fmt.Fprintln(os.Stderr, "  $HOME/.local/bin/rbackup")
-		fmt.Fprintln(os.Stderr, "  $HOME/.local/bin/rbackup.sh")
-		fmt.Fprintln(os.Stderr, "  PATH 中的 rbackup.sh / rbackup")
-		os.Exit(1)
-	}
 	cfg, err := ParseConfig(a.configPath)
 	if err != nil {
 		a.setStatus(fmt.Sprintf("[red]重新加载失败: %v[-]", err))
@@ -1923,6 +2077,22 @@ func main() {
 		fmt.Fprintf(os.Stderr, "[DEBUG] script=%s\n", a.scriptPath)
 		fmt.Fprintf(os.Stderr, "[DEBUG] config=%s\n", a.configPath)
 		fmt.Fprintf(os.Stderr, "[DEBUG] sep=%q\n", sepChar)
+	}
+
+	if a.scriptPath == "" {
+		fmt.Fprintln(os.Stderr, "错误：找不到 rbackup.sh")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "请按以下方式之一指定：")
+		fmt.Fprintln(os.Stderr, "  1. 命令行: rbackup-tui -s /path/to/rbackup.sh")
+		fmt.Fprintln(os.Stderr, "  2. 环境变量: export RBACKUP_SCRIPT=/path/to/rbackup.sh")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "查找过的位置：")
+		fmt.Fprintln(os.Stderr, "  <二进制同目录>/rbackup.sh")
+		fmt.Fprintln(os.Stderr, "  $HOME/rbackup/rbackup.sh")
+		fmt.Fprintln(os.Stderr, "  $HOME/.local/bin/rbackup")
+		fmt.Fprintln(os.Stderr, "  $HOME/.local/bin/rbackup.sh")
+		fmt.Fprintln(os.Stderr, "  PATH 中的 rbackup.sh / rbackup")
+		os.Exit(1)
 	}
 
 	cfg, err := ParseConfig(a.configPath)
