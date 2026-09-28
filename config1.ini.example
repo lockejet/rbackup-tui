@@ -6,7 +6,8 @@ SSH_PORT=22
 SSH_USER=admin
 SSH_KEY=~/.ssh/id_ed25519
 LOG_DIR=/var/log/rbackup
-GLOBAL_OPTS=-avzhu --progress
+#GLOBAL_OPTS=-avzhu --progress
+GLOBAL_OPTS=-avzhu --progress --no-perms --no-times --omit-dir-times --update --delete-after --8-bit-output
 RSYNC_PATH=sudo rsync
 DEFAULT_REMOVE_SOURCE=no
 

@@ -13,7 +13,8 @@ SSH_KEY=/home/admin/.ssh/id_ed25519
 LOG_DIR=/var/log
 
 # 全局 rsync 默认选项（可被任务级 opts 追加覆盖）
-GLOBAL_OPTS=-avzhu --progress
+#GLOBAL_OPTS=-avzhu --progress
+GLOBAL_OPTS=-avzhu --progress --no-perms --no-times --omit-dir-times --update --delete-after --8-bit-output
 
 # 提权选项，需要命令行中用--sudo 激活
 RSYNC_PATH=sudo rsync
