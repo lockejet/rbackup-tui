@@ -18,7 +18,9 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 - 使用
 - 快捷键
 - 挂载门禁
+- 常见问题排查
 - 构建
+- 打包与发布
 - 环境变量
 - 常见问题
 - 文件结构
@@ -33,6 +35,7 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 - 运行 / 预览：Enter 运行，d 预演（dry-run）
 - 危险操作二次确认：--delete、--remove-source-files 逐个确认，支持 y/n/a/s
 - 挂载门禁：支持 require_mounted / require_unmounted
+- 软链接挂载点兼容：用 realpath 解析路径后再比对
 - 实时日志：rsync 输出实时滚动，可暂停、翻页
 - 累积统计：成功 / 跳过 / 失败 / 挂载门禁失败
 - 错误摘要：失败任务自动提取错误行
@@ -80,6 +83,26 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 
 - Go 1.21+
 - rbackup.sh（同目录或指定路径）
+
+### 下载发布包
+
+从 GitHub Releases 下载对应平台的压缩包，解压后目录结构：
+
+    rbackup-tui-linux-amd64/
+    ├── rbackup-tui
+    ├── rbackup.sh
+    ├── config1.ini.example
+    ├── config2.ini.example
+    ├── README.md
+    └── LICENSE
+
+复制示例配置后即可运行：
+
+    cp config2.ini.example config2.ini
+    vim config2.ini
+    ./rbackup-tui -c config2.ini -s rbackup.sh
+
+`rbackup.sh` 与二进制同目录时，`-s` 可以省略。
 
 ### 源码安装
 
@@ -164,6 +187,41 @@ MOUNT_POLICY 取值：
 
 推荐使用新键，但旧键依然有效。
 
+### 关于 --chown
+
+rsync 只允许 `--chown` 出现一次。可以放在：
+
+- `GLOBAL_OPTS` 里（所有任务共用）
+- 每个任务的 `opts` 里（任务各自控制）
+
+**不能两处都写**，否则报错：
+
+    rsync: You can only specify a user-affecting --chown once.
+
+推荐放 `GLOBAL_OPTS`，任务 opts 里不再重复。
+
+### 关于时间戳
+
+加密文件系统（gocryptfs 等）挂载点常出现：
+
+    rsync: [generator] failed to set times on "...": Operation not permitted (1)
+    rsync error: some files/attrs were not transferred (code 23)
+
+原因是 rsync 尝试把源端 mtime 设置到目标，但被挂载点拒绝。
+
+解决：在 `GLOBAL_OPTS` 里加 `--omit-dir-times`（跳过目录时间戳），如需跳过文件时间戳再加 `--no-times`。
+
+| 选项 | 作用 |
+|---|---|
+| `--no-times` | 不设置**文件**的 mtime |
+| `--omit-dir-times` | 不设置**目录**的 mtime |
+
+推荐组合：
+
+    GLOBAL_OPTS=-avzhu --progress --no-perms --omit-dir-times --chown=admin:users --update --delete-after
+
+如果仍有零星 code 23 报错，不影响内容同步，可忽略。
+
 ### 示例配置一：明文源 → 明文挂载点
 
 对应 `config1.ini.example`。源是明文目录，目标是已解密的 gocryptfs 挂载点，使用旧键 `require_mount` / `mount_path` 书写。
@@ -175,7 +233,7 @@ MOUNT_POLICY 取值：
     SSH_PORT=22
     SSH_KEY=~/.ssh/id_ed25519
     LOG_DIR=/var/log/rbackup
-    GLOBAL_OPTS=-avzhu --progress
+    GLOBAL_OPTS=-avzhu --progress --no-perms --omit-dir-times --chown=admin:users --update --delete-after
     RSYNC_PATH=sudo rsync
     DEFAULT_REMOVE_SOURCE=no
 
@@ -188,7 +246,7 @@ MOUNT_POLICY 取值：
     [task_alice]
     src=/d/alice/my_company/
     dst=/srv/st1000dm/Work/doc-alice
-    opts=--no-perms --chown=admin:users --update --delete-after
+    opts=
     delete=yes
     remove_source=no
     require_mount=yes
@@ -198,7 +256,7 @@ MOUNT_POLICY 取值：
     [task_bob]
     src=/d/bob/my_company/
     dst=/srv/st1000dm/Work/doc-bob
-    opts=--no-perms --chown=admin:users --update --delete-after
+    opts=
     delete=yes
     remove_source=no
     require_mount=yes
@@ -208,7 +266,7 @@ MOUNT_POLICY 取值：
     [task_charlie]
     src=/d/charlie/DevOps
     dst=/srv/st1000dm
-    opts=--no-perms --chown=admin:users --update --delete-after
+    opts=
     delete=yes
     remove_source=no
     require_mount=no
@@ -253,7 +311,7 @@ MOUNT_POLICY 取值：
     LOG_DIR=/var/log
 
     # 全局 rsync 默认选项（可被任务级 opts 追加覆盖）
-    GLOBAL_OPTS=-avzhu --progress
+    GLOBAL_OPTS=-avzhu --progress --omit-dir-times
 
     # 提权选项，需要命令行中用 --sudo 激活
     RSYNC_PATH=sudo rsync
@@ -343,6 +401,18 @@ MOUNT_POLICY 取值：
 |---|---|
 | -c, --config | 配置文件路径 |
 | -s, --script | rbackup.sh 路径 |
+
+### 脚本路径查找顺序
+
+1. 命令行 `-s` 指定
+2. 环境变量 `RBACKUP_SCRIPT`
+3. **二进制同目录**（发布包解压场景）
+4. `$HOME/rbackup/rbackup.sh`
+5. `$HOME/.local/bin/rbackup`
+6. `$HOME/.local/bin/rbackup.sh`
+7. `PATH` 中的 `rbackup.sh` / `rbackup`
+
+全找不到时报错退出，提示用 `-s` 或 `RBACKUP_SCRIPT` 指定。
 
 ### 典型流程
 
@@ -450,6 +520,75 @@ MOUNT_POLICY 取值：
 
 同时为 yes 会报错退出（退出码 2）。
 
+### 软链接挂载点
+
+部分系统（如 OpenMediaVault）用软链接组织存储：
+
+    /srv/st1000dm -> /srv/dev-disk-by-id-ata-xxx-part1
+
+直接比较字符串会误判"未挂载"。rbackup.sh 在远端一次 SSH 完成：
+
+1. `realpath -m <mount_point>` 解析软链接
+2. `findmnt -T <真实路径>` 查询挂载信息
+3. `realpath -m <TARGET>` 再解析一遍
+4. 比较两个真实路径
+
+这样即使 mount_point 和 findmnt 返回的路径写法不同，只要指向同一位置，就判定"已挂载"。
+
+---
+
+## 常见问题排查
+
+### 挂载检查误报"未挂载"
+
+**现象**：手动执行 `findmnt -T <path>` 返回正确结果，但 rbackup.sh 报"未挂载"。
+
+**原因**：路径中含软链接，`findmnt` 返回真实路径，与配置的 mount_point 字符串不相等。
+
+**验证**：
+
+    ssh -p <PORT> -i <KEY> <USER>@<HOST> \
+        'realpath -m /your/mount/point && \
+         findmnt -rn -T $(realpath -m /your/mount/point) -o TARGET,FSTYPE'
+
+如果 TARGET 和 realpath 输出不同，说明是软链接问题。
+
+**解决**：rbackup.sh 已内置 realpath 解析，无需额外处理。如果仍报错，检查 rbackup.sh 是否为最新版本。
+
+### rsync 报 "failed to set times"
+
+**现象**：
+
+    rsync: [generator] failed to set times on "...": Operation not permitted (1)
+    rsync error: some files/attrs were not transferred (code 23)
+
+**原因**：加密挂载点拒绝设置 mtime。
+
+**解决**：GLOBAL_OPTS 加 `--omit-dir-times`（目录），必要时再加 `--no-times`（文件）：
+
+    GLOBAL_OPTS=-avzhu --progress --no-perms --omit-dir-times --chown=admin:users --update --delete-after
+
+### rsync 报 "You can only specify a user-affecting --chown once"
+
+**原因**：`--chown` 在 GLOBAL_OPTS 和任务 opts 里各写了一次。
+
+**解决**：只保留一处。检查方法：
+
+    grep -n "\-\-chown" config1.ini
+
+### 日志里中文显示为 \#345\#267\#245
+
+**原因**：rsync 在非 UTF-8 locale 下转义非 ASCII 字符。
+
+**解决**：
+
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+
+或在 rsync 选项里加 `--8-bit-output`。
+
+不影响同步，只是日志可读性问题。
+
 ---
 
 ## 构建
@@ -475,11 +614,90 @@ MOUNT_POLICY 取值：
 
 Makefile 会自动注入版本：
 
-    LDFLAGS := -X main.Version=$(git describe --tags --always --dirty) \
-               -X main.BuildTime=$(date +%Y-%m-%d) \
-               -X main.GitCommit=$(git rev-parse --short HEAD)
+    BUILD_VERSION := $(git describe --tags --always --dirty)
+    VERSION       := $(git describe --tags --abbrev=0)
 
-打 tag 后版本号会显示为 v1.1.0，未打 tag 显示 commit hash。
+- `BUILD_VERSION`：含 commit hash 和 dirty 标记，用于二进制内部（帮助浮层显示）
+- `VERSION`：纯 tag，用于文件名和 Release 版本号
+
+打 tag 后版本号显示为 `v1.1.0`，未打 tag 显示 `dev`。
+
+---
+
+## 打包与发布
+
+### 打包
+
+    make package
+
+生成三个压缩包到 `dist/`：
+
+    rbackup-tui-v1.1.0-linux-amd64.tar.gz
+    rbackup-tui-v1.1.0-linux-arm64.tar.gz
+    rbackup-tui-v1.1.0-windows-amd64.zip
+
+每个压缩包内含：
+
+    rbackup-tui-<平台>/
+    ├── rbackup-tui (或 .exe)
+    ├── rbackup.sh
+    ├── config1.ini.example
+    ├── config2.ini.example
+    ├── README.md
+    └── LICENSE
+
+顶层有子目录，不会污染用户当前目录。`rbackup.sh` 与二进制同目录，用户运行时自动找到。
+
+### 发布到 GitHub Release
+
+前提：安装 gh CLI 并登录。
+
+    gh auth login
+
+流程：
+
+    # 1. 提交代码
+    git add -A
+    git commit -m "feat: ..."
+    git push
+
+    # 2. 手动打 tag
+    git tag -a v1.1.2 -m "v1.1.2: ..."
+
+    # 3. 推送 tag
+    git push origin v1.1.2
+
+    # 4. 打包 + 创建 Release + 上传
+    make release
+
+`make release` 会：
+
+1. 检查 gh 已装、已登录、tag 存在
+2. 编译三个平台
+3. 打包成压缩包
+4. 从 git log 自动生成 `dist/RELEASE_NOTES.md`
+5. 调用 `gh release create` 创建 Release 并上传附件
+
+**不自动 push**：tag 和 main 都需要用户手动 push，避免误操作。
+
+### 其他发布命令
+
+    # 只上传附件（重新编译后覆盖）
+    make release-upload VERSION=v1.1.2
+
+    # 只生成 notes 文件查看
+    make release-notes VERSION=v1.1.2
+
+    # 删除 Release（保留 tag）
+    make release-delete VERSION=v1.1.2
+
+### 参数
+
+| 变量 | 说明 |
+|---|---|
+| VERSION | 版本号，默认取 git 最近 tag |
+| NOTES | notes 文件路径，默认 dist/RELEASE_NOTES.md |
+| REPO | 仓库，默认从 git remote 解析 |
 
 ---
 
@@ -488,7 +706,7 @@ Makefile 会自动注入版本：
 | 变量 | 说明 | 默认 |
 |---|---|---|
 | RBACKUP_CONFIG | 配置文件路径 | $HOME/rbackup/config.ini |
-| RBACKUP_SCRIPT | rbackup.sh 路径 | $HOME/rbackup/rbackup.sh |
+| RBACKUP_SCRIPT | rbackup.sh 路径 | 自动查找 |
 | RBACKUP_BASH | bash 可执行文件路径 | 自动查找 |
 | RBACKUP_DEBUG_KEYS | 设为 1 输出按键调试日志 | — |
 | RBACKUP_SEP | 分隔线字符 | ┄ |
@@ -545,6 +763,7 @@ rbackup.sh 会自动回退到脚本同目录的 log/。
     ├── main.go                  TUI 主程序
     ├── config.go                配置解析
     ├── runner.go                执行 rbackup.sh
+    ├── rbackup.sh               备份核心脚本
     ├── go.mod
     ├── go.sum
     ├── Makefile
@@ -552,9 +771,9 @@ rbackup.sh 会自动回退到脚本同目录的 log/。
     ├── LICENSE
     ├── config1.ini.example      示例一：明文源 → 明文挂载点
     ├── config2.ini.example      示例二：密文源 → 密文目录
-    └── bin/                     编译产物（不入库）
-        ├── windows/
-        └── linux/
+    ├── bin/                     编译产物（不入库）
+    ├── dist/                    发布包（不入库）
+    └── .staging/                打包临时目录（不入库）
 
 ---
 
