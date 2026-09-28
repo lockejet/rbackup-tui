@@ -414,18 +414,27 @@ get_basename() {
     echo "${path##*/}"
 }
 
-# 远端挂载检查
+# 远端挂载检查（realpath 版，兼容软链接挂载点）
 #   参数: mode  path  want_fstype
 #   返回: 0=通过  1=未通过  2=SSH/检查错误
+#   stdout: 通过时输出当前状态描述；失败时输出诊断标记（__UNMOUNTED__ 等）
 remote_mount_check2() {
     local mode="$1"
     local path="$2"
     local want_fstype="${3:-}"
 
+    # 一次 SSH 完成：realpath 解析 + findmnt + 再次 realpath
+    # 输出格式：<real_path>|<real_tgt>|<fstype>
     local out rc
     out=$(ssh -p "$SSH_PORT" -i "$SSH_KEY" "${SSH_USER}@${HOST}" \
           "if [ ! -e '$path' ]; then echo '__NO_PATH__'; exit 0; fi; \
-           findmnt -rn -T '$path' -o TARGET,FSTYPE" 2>/dev/null) \
+           real_path=\$(realpath -m '$path' 2>/dev/null || echo '$path'); \
+           info=\$(findmnt -rn -T \"\$real_path\" -o TARGET,FSTYPE 2>/dev/null); \
+           if [ -z \"\$info\" ]; then echo '__EMPTY__'; exit 0; fi; \
+           tgt=\$(echo \"\$info\" | awk '{print \$1}'); \
+           fstype=\$(echo \"\$info\" | awk '{print \$2}'); \
+           real_tgt=\$(realpath -m \"\$tgt\" 2>/dev/null || echo \"\$tgt\"); \
+           echo \"\$real_path|\$real_tgt|\$fstype\"" 2>/dev/null) \
         && rc=0 || rc=$?
 
     if [ $rc -ne 0 ]; then
@@ -443,19 +452,18 @@ remote_mount_check2() {
                 return 1
             fi
             ;;
+        __EMPTY__)
+            echo "__EMPTY__"
+            return 2
+            ;;
     esac
 
-    if [ -z "$out" ]; then
-        echo "__EMPTY__"
-        return 2
-    fi
-
-    local tgt fstype
-    read -r tgt fstype <<<"$out"
+    local real_path real_tgt fstype
+    IFS='|' read -r real_path real_tgt fstype <<<"$out"
 
     if [ "$mode" = "mounted" ]; then
-        if [ "$tgt" != "$path" ]; then
-            echo "__UNMOUNTED__ tgt=$tgt fstype=$fstype"
+        if [ "$real_tgt" != "$real_path" ]; then
+            echo "__UNMOUNTED__ tgt=$real_tgt fstype=$fstype"
             return 1
         fi
         if [ -n "$want_fstype" ]; then
@@ -470,16 +478,17 @@ remote_mount_check2() {
         echo "$fstype"
         return 0
     else
-        if [ "$tgt" = "$path" ]; then
+        # unmounted 模式：路径本身不是挂载点即通过
+        if [ "$real_tgt" = "$real_path" ]; then
             echo "__MOUNTED__ fstype=$fstype"
             return 1
         fi
-        echo "未挂载（最近挂载点 $tgt，fstype=$fstype）"
+        echo "未挂载（最近挂载点 $real_tgt，fstype=$fstype）"
         return 0
     fi
 }
 
-# 打印挂载失败诊断信息
+# 打印挂载失败诊断信息（含完整 SSH 命令、绝对路径、多级备选）
 print_mount_fail_hint() {
     local mode="$1"
     local path="$2"
@@ -497,7 +506,7 @@ print_mount_fail_hint() {
                 echo ""
                 echo "            排查命令（在目标主机 ${HOST} 上执行）："
                 echo "              $ssh_prefix \\"
-                echo "                  '/usr/bin/findmnt -rn -T $path -o TARGET,FSTYPE'"
+                echo "                  'realpath -m $path && findmnt -rn -T \$(realpath -m $path) -o TARGET,FSTYPE'"
                 echo ""
                 echo "            若确认未挂载，请重新挂载 gocryptfs 后重试。"
             } | tee -a "$LOG_FILE"
@@ -512,7 +521,7 @@ print_mount_fail_hint() {
                 echo ""
                 echo "            排查命令（在目标主机 ${HOST} 上执行）："
                 echo "              $ssh_prefix \\"
-                echo "                  '/usr/bin/findmnt -rn -T $path -o TARGET,FSTYPE'"
+                echo "                  'realpath -m $path && findmnt -rn -T \$(realpath -m $path) -o TARGET,FSTYPE'"
             } | tee -a "$LOG_FILE"
             ;;
         __NO_PATH__)
@@ -537,7 +546,7 @@ print_mount_fail_hint() {
                 echo ""
                 echo "            排查命令（在目标主机 ${HOST} 上执行）："
                 echo "              $ssh_prefix \\"
-                echo "                  '/usr/bin/findmnt -rn -T $path -o TARGET,FSTYPE'"
+                echo "                  'realpath -m $path && findmnt -rn -T \$(realpath -m $path) -o TARGET,FSTYPE'"
                 echo ""
                 echo "            卸载目标挂载点（按推荐顺序）："
                 echo ""
@@ -548,15 +557,15 @@ print_mount_fail_hint() {
                 echo ""
                 echo "              【2】直接卸载 FUSE（推荐）："
                 echo "                $ssh_prefix \\"
-                echo "                    '/usr/bin/fusermount3 -u $path'"
+                echo "                    '/usr/bin/fusermount3 -u \$(realpath -m $path)'"
                 echo ""
                 echo "              【3】旧版 gocryptfs（无 fusermount3 时）："
                 echo "                $ssh_prefix \\"
-                echo "                    '/usr/bin/fusermount -u $path'"
+                echo "                    '/usr/bin/fusermount -u \$(realpath -m $path)'"
                 echo ""
                 echo "              【4】以上失败时，检查是否有进程占用："
                 echo "                $ssh_prefix \\"
-                echo "                    '/usr/sbin/lsof +D $path'"
+                echo "                    '/usr/sbin/lsof +D \$(realpath -m $path)'"
                 echo ""
                 echo "            注意：不要使用 fusermount -z（lazy unmount），"
                 echo "                  它会在内核清理前返回，可能导致数据丢失。"
