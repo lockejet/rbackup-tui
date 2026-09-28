@@ -18,7 +18,7 @@ while [ -L "$SCRIPT_PATH" ]; do
 done
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 
-# ---------- 默认配置（通用占位符，敏感信息放 config.ini） ----------
+# ---------- 默认配置 ----------
 DEFAULT_CONFIG="${SCRIPT_DIR}/config.ini"
 DEFAULT_HOST="localhost"
 DEFAULT_SSH_PORT="22"
@@ -76,10 +76,122 @@ TEMP_REQUIRE_UNMOUNTED=""
 TEMP_MOUNT_POINT=""
 TEMP_MOUNT_FSTYPE=""
 
+# 供主执行累加 stats
+LAST_STATS_FILES_XFER=0
+LAST_STATS_FILES_TOTAL=0
+LAST_STATS_BYTES_TOTAL=0
+LAST_STATS_BYTES_SENT=0
+LAST_STATS_BYTES_RECV=0
+LAST_STATS_RSYNC_MS=0
+LAST_STATS_LIST_MS=0
+LAST_STATS_RESULT=""
+
 IS_INTERACTIVE=0
 if [ -t 0 ] && [ -t 1 ]; then
     IS_INTERACTIVE=1
 fi
+
+# ---------- 格式化工具 ----------
+# 秒数 → 人类可读（英文单位）
+#   < 60s : 47s
+#   >= 60s: 3min15s
+format_duration() {
+    local secs="${1:-0}"
+    if [ "$secs" -lt 0 ]; then
+        secs=0
+    fi
+    if [ "$secs" -lt 60 ]; then
+        echo "${secs}s"
+    else
+        echo "$((secs / 60))min$((secs % 60))s"
+    fi
+}
+
+# 字节 → 人类可读（国际通用单位）
+format_bytes() {
+    local b="${1:-0}"
+    if [ "$b" -lt 1024 ]; then
+        echo "${b}B"
+    elif [ "$b" -lt 1048576 ]; then
+        awk -v b="$b" 'BEGIN { printf "%.2fK", b/1024 }'
+    elif [ "$b" -lt 1073741824 ]; then
+        awk -v b="$b" 'BEGIN { printf "%.2fM", b/1048576 }'
+    else
+        awk -v b="$b" 'BEGIN { printf "%.2fG", b/1073741824 }'
+    fi
+}
+
+# 速率：字节 / 毫秒 → KB/s 字符串
+format_rate() {
+    local bytes="${1:-0}" ms="${2:-0}"
+    if [ "$ms" -le 0 ]; then
+        echo "0 KB/s"
+        return
+    fi
+    awk -v b="$bytes" -v ms="$ms" \
+        'BEGIN { printf "%.2f KB/s", b / 1024 / (ms / 1000) }'
+}
+
+# rsync 输出单元（26.00M / 28.97K / 330）→ 字节
+to_bytes() {
+    local raw="${1:-0}"
+    local num unit
+    if [[ "$raw" =~ ^([0-9.]+)([KMGTkmgt]?)$ ]]; then
+        num="${BASH_REMATCH[1]}"
+        unit="${BASH_REMATCH[2]}"
+    else
+        echo 0
+        return
+    fi
+    local mul=1
+    case "$unit" in
+        K|k) mul=1024 ;;
+        M|m) mul=1048576 ;;
+        G|g) mul=1073741824 ;;
+        T|t) mul=1099511627776 ;;
+    esac
+    awk -v n="$num" -v m="$mul" 'BEGIN { printf "%d", n * m }'
+}
+
+# 追加单个任务到 stats 文件（全部为展示字段，英文）
+write_stats_task() {
+    local name="$1" result="$2"
+    local dur_ms="$3" prep_ms="$4" rsync_ms="$5" list_ms="$6"
+    local files_xfer="$7" files_total="$8"
+    local bytes_total="$9" bytes_sent="${10}" bytes_recv="${11}"
+
+    [ -z "$STATS_FILE" ] && return 0
+
+    local dur_str prep_str rsync_str list_str
+    dur_str="$(format_duration $((dur_ms / 1000)))"
+    prep_str="$(format_duration $((prep_ms / 1000)))"
+    rsync_str="$(format_duration $((rsync_ms / 1000)))"
+    list_str="$(format_duration $((list_ms / 1000)))"
+
+    local total_size_str sent_str recv_str data_str
+    total_size_str="$(format_bytes "$bytes_total")"
+    sent_str="$(format_bytes "$bytes_sent")"
+    recv_str="$(format_bytes "$bytes_recv")"
+    data_str="sent ${sent_str} + received ${recv_str}"
+
+    local rate_str
+    rate_str="$(format_rate $((bytes_sent + bytes_recv)) "$rsync_ms")"
+
+    {
+        echo "[task]"
+        echo "name=$name"
+        echo "result=$result"
+        echo "duration=$dur_str"
+        echo "files=$files_xfer / $files_total"
+        echo "total_size=$total_size_str"
+        echo "data=$data_str"
+        echo "rsync=$rsync_str"
+        echo "list=$list_str"
+        echo "rate=$rate_str"
+        echo "prep=$prep_str"
+        echo ""
+    } >> "$STATS_FILE"
+}
 
 # ---------- 路径展开 ----------
 expand_local_path() {
@@ -176,8 +288,8 @@ while true; do
   MOUNT_POLICY 挂载门禁策略
 
 挂载门禁语义:
-  require_mounted=yes    目标必须已挂载（用于 源明文 → 目标明文挂载点）
-  require_unmounted=yes  目标必须未挂载（用于 源密文 → 目标密文目录）
+  require_mounted=yes    目标必须已挂载
+  require_unmounted=yes  目标必须未挂载
   二者互斥，同时为 yes 会报错退出。
 EOF
             exit 0 ;;
@@ -366,10 +478,11 @@ fi
 
 RUN_MODE="${RUN_MODE:-task}"
 
-# ---------- 初始化日志 ----------
+# ---------- 初始化日志和统计文件 ----------
 SCRIPT_NAME="$(basename "$SCRIPT_PATH" .sh)"
-LOG_DATE="$(date +%Y%m%d)"
-LOG_BASENAME="${SCRIPT_NAME}_${LOG_DATE}.log"
+LOG_TIMESTAMP="$(date +%Y%m%d_%H%M)"
+LOG_BASENAME="${SCRIPT_NAME}_${LOG_TIMESTAMP}.log"
+STATS_BASENAME="${SCRIPT_NAME}_${LOG_TIMESTAMP}.stats"
 
 log_dir_writable() {
     local dir="$1"
@@ -381,11 +494,11 @@ log_dir_writable() {
     return 0
 }
 
-LOG_FILE=""
+LOG_DIR_RESOLVED=""
 if log_dir_writable "$LOG_DIR"; then
-    LOG_FILE="${LOG_DIR}/${LOG_BASENAME}"
+    LOG_DIR_RESOLVED="$LOG_DIR"
 elif log_dir_writable "${SCRIPT_DIR}/log"; then
-    LOG_FILE="${SCRIPT_DIR}/log/${LOG_BASENAME}"
+    LOG_DIR_RESOLVED="${SCRIPT_DIR}/log"
     echo "警告：无法写入 $LOG_DIR，日志回退到 ${SCRIPT_DIR}/log/" >&2
 else
     echo "错误：无法创建日志目录" >&2
@@ -395,10 +508,24 @@ else
     exit 1
 fi
 
+LOG_FILE="${LOG_DIR_RESOLVED}/${LOG_BASENAME}"
+STATS_FILE="${LOG_DIR_RESOLVED}/${STATS_BASENAME}"
+
 if ! touch "$LOG_FILE" 2>/dev/null; then
     echo "错误：无法写入日志文件 $LOG_FILE" >&2
     exit 1
 fi
+
+# 初始化统计文件（英文头部）
+{
+    echo "# rbackup stats report"
+    echo "# generated: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "# script: $SCRIPT_PATH"
+    echo "# config: $CONFIG_FILE"
+    echo "# remote: ${SSH_USER}@${HOST}:${SSH_PORT}"
+    echo "# log: $LOG_FILE"
+    echo ""
+} > "$STATS_FILE"
 
 # ---------- 辅助函数 ----------
 contains_host() {
@@ -414,17 +541,11 @@ get_basename() {
     echo "${path##*/}"
 }
 
-# 远端挂载检查（realpath 版，兼容软链接挂载点）
-#   参数: mode  path  want_fstype
-#   返回: 0=通过  1=未通过  2=SSH/检查错误
-#   stdout: 通过时输出当前状态描述；失败时输出诊断标记（__UNMOUNTED__ 等）
 remote_mount_check2() {
     local mode="$1"
     local path="$2"
     local want_fstype="${3:-}"
 
-    # 一次 SSH 完成：realpath 解析 + findmnt + 再次 realpath
-    # 输出格式：<real_path>|<real_tgt>|<fstype>
     local out rc
     out=$(ssh -p "$SSH_PORT" -i "$SSH_KEY" "${SSH_USER}@${HOST}" \
           "if [ ! -e '$path' ]; then echo '__NO_PATH__'; exit 0; fi; \
@@ -478,7 +599,6 @@ remote_mount_check2() {
         echo "$fstype"
         return 0
     else
-        # unmounted 模式：路径本身不是挂载点即通过
         if [ "$real_tgt" = "$real_path" ]; then
             echo "__MOUNTED__ fstype=$fstype"
             return 1
@@ -488,7 +608,6 @@ remote_mount_check2() {
     fi
 }
 
-# 打印挂载失败诊断信息（含完整 SSH 命令、绝对路径、多级备选）
 print_mount_fail_hint() {
     local mode="$1"
     local path="$2"
@@ -590,7 +709,6 @@ print_mount_fail_hint() {
     esac
 }
 
-# 嵌套目录警告
 confirm_task() {
     local task_name="$1" src="$2" dst="$3"
 
@@ -633,8 +751,22 @@ do_backup() {
     local mount_point="${10}"
     local mount_fstype="${11}"
 
+    LAST_STATS_FILES_XFER=0
+    LAST_STATS_FILES_TOTAL=0
+    LAST_STATS_BYTES_TOTAL=0
+    LAST_STATS_BYTES_SENT=0
+    LAST_STATS_BYTES_RECV=0
+    LAST_STATS_RSYNC_MS=0
+    LAST_STATS_LIST_MS=0
+    LAST_STATS_RESULT=""
+
+    local t_start
+    t_start=$(date +%s)
+
     if [ "$remove_source_flag" = "yes" ] && [ $FORCE_MODE -eq 0 ] && [ $IS_INTERACTIVE -eq 0 ]; then
         echo "错误：任务 '$task_name' 启用了 remove_source，但当前为非交互环境且未使用 --force，拒绝执行。" | tee -a "$LOG_FILE"
+        LAST_STATS_RESULT="failed"
+        write_stats_task "$task_name" "failed" 0 0 0 0 0 0 0 0 0
         return 1
     fi
 
@@ -667,20 +799,34 @@ do_backup() {
                 ;;
             1)
                 print_mount_fail_hint "$gate_mode" "$check_path" "$mount_info"
+                local t_now
+                t_now=$(date +%s)
+                local dur_ms=$(( (t_now - t_start) * 1000 ))
                 if [ $CHECK_MOUNT_ONLY -eq 1 ]; then
+                    LAST_STATS_RESULT="skipped"
+                    write_stats_task "$task_name" "skipped" "$dur_ms" 0 0 0 0 0 0 0 0
                     return 2
                 fi
                 if [ "$MOUNT_POLICY" = "fail" ]; then
                     echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务 '$task_name' 因挂载门禁失败。" | tee -a "$LOG_FILE"
+                    LAST_STATS_RESULT="mount_failed"
+                    write_stats_task "$task_name" "mount_failed" "$dur_ms" 0 0 0 0 0 0 0 0
                     return 3
                 else
                     echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务 '$task_name' 因挂载门禁跳过。" | tee -a "$LOG_FILE"
+                    LAST_STATS_RESULT="skipped"
+                    write_stats_task "$task_name" "skipped" "$dur_ms" 0 0 0 0 0 0 0 0
                     return 2
                 fi
                 ;;
             2)
                 print_mount_fail_hint "$gate_mode" "$check_path" "$mount_info"
+                local t_now
+                t_now=$(date +%s)
+                local dur_ms=$(( (t_now - t_start) * 1000 ))
                 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务 '$task_name' 挂载检查失败。" | tee -a "$LOG_FILE"
+                LAST_STATS_RESULT="mount_failed"
+                write_stats_task "$task_name" "mount_failed" "$dur_ms" 0 0 0 0 0 0 0 0
                 return 3
                 ;;
         esac
@@ -688,6 +834,7 @@ do_backup() {
 
     if [ $CHECK_MOUNT_ONLY -eq 1 ]; then
         echo "[CHECK-MOUNT] 任务 '$task_name' 挂载检查通过。" | tee -a "$LOG_FILE"
+        LAST_STATS_RESULT="success"
         return 0
     fi
 
@@ -698,12 +845,22 @@ do_backup() {
 
     if ! ssh -p "$SSH_PORT" -i "$SSH_KEY" "${SSH_USER}@${HOST}" "test -d '$parent_dir'" 2>/dev/null; then
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] 错误：远程父目录 '$parent_dir' 不存在，无法创建目标目录 '$remote_dst'。" | tee -a "$LOG_FILE"
+        local t_now
+        t_now=$(date +%s)
+        local dur_ms=$(( (t_now - t_start) * 1000 ))
+        LAST_STATS_RESULT="failed"
+        write_stats_task "$task_name" "failed" "$dur_ms" 0 0 0 0 0 0 0 0
         return 1
     fi
 
     if [ $DRY_RUN -eq 0 ] && [ $AUTO_DRY -eq 0 ]; then
         if ! ssh -p "$SSH_PORT" -i "$SSH_KEY" "${SSH_USER}@${HOST}" "mkdir -p '$remote_dst'" 2>&1 | tee -a "$LOG_FILE"; then
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] 错误：无法创建远程目标目录 '$remote_dst'" | tee -a "$LOG_FILE"
+            local t_now
+            t_now=$(date +%s)
+            local dur_ms=$(( (t_now - t_start) * 1000 ))
+            LAST_STATS_RESULT="failed"
+            write_stats_task "$task_name" "failed" "$dur_ms" 0 0 0 0 0 0 0 0
             return 1
         fi
     else
@@ -731,7 +888,7 @@ do_backup() {
         remove_source_opts="--remove-source-files"
     fi
 
-    local rsync_opts="--progress"
+    local rsync_opts="--progress --stats"
     [ -n "$GLOBAL_OPTS" ] && rsync_opts="$rsync_opts $GLOBAL_OPTS"
     if [ $ENABLE_RSYNC_PATH -eq 1 ] && [ -n "$RSYNC_PATH" ]; then
         rsync_opts="$rsync_opts --rsync-path=\"$RSYNC_PATH\""
@@ -773,12 +930,18 @@ do_backup() {
     if [ $DRY_RUN -eq 1 ] || [ $AUTO_DRY -eq 1 ]; then
         echo "[DRY-RUN] 将要执行的命令:" | tee -a "$LOG_FILE"
         echo "  $cmd" | tee -a "$LOG_FILE"
+        LAST_STATS_RESULT="preview"
         return 0
     fi
 
     if [ $is_temp -eq 0 ]; then
         if ! confirm_task "$task_name" "$src" "$dst"; then
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务 '$task_name' 因用户取消而跳过。" | tee -a "$LOG_FILE"
+            local t_now
+            t_now=$(date +%s)
+            local dur_ms=$(( (t_now - t_start) * 1000 ))
+            LAST_STATS_RESULT="skipped"
+            write_stats_task "$task_name" "skipped" "$dur_ms" 0 0 0 0 0 0 0 0
             return 1
         fi
     fi
@@ -787,6 +950,11 @@ do_backup() {
         local mkdir_cmd="mkdir -p \"${recycle_bin}\""
         if ! ssh -p "$SSH_PORT" -i "$SSH_KEY" "${SSH_USER}@${HOST}" "$mkdir_cmd" 2>/dev/null; then
             echo "错误：无法在远程创建回收站目录 ${recycle_bin}" | tee -a "$LOG_FILE"
+            local t_now
+            t_now=$(date +%s)
+            local dur_ms=$(( (t_now - t_start) * 1000 ))
+            LAST_STATS_RESULT="failed"
+            write_stats_task "$task_name" "failed" "$dur_ms" 0 0 0 0 0 0 0 0
             return 1
         fi
     fi
@@ -796,29 +964,117 @@ do_backup() {
         read -r -p "       确认继续？[y/N] " ans
         case "$ans" in
             y|Y|"") ;;
-            *) echo "       已取消任务 '$task_name'。" | tee -a "$LOG_FILE"; return 1 ;;
+            *) echo "       已取消任务 '$task_name'。" | tee -a "$LOG_FILE"
+               local t_now
+               t_now=$(date +%s)
+               local dur_ms=$(( (t_now - t_start) * 1000 ))
+               LAST_STATS_RESULT="skipped"
+               write_stats_task "$task_name" "skipped" "$dur_ms" 0 0 0 0 0 0 0 0
+               return 1 ;;
         esac
     fi
 
+    # 准备阶段结束
+    local t_rsync_start
+    t_rsync_start=$(date +%s)
+
     echo "----------------------------------------" | tee -a "$LOG_FILE"
-    eval "$cmd" 2>&1 | tee -a "$LOG_FILE"
+
+    local rsync_tmp
+    rsync_tmp=$(mktemp)
+    eval "$cmd" 2>&1 | tee -a "$LOG_FILE" "$rsync_tmp"
     local rsync_exit=${PIPESTATUS[0]}
 
+    local t_end
+    t_end=$(date +%s)
+
+    # 解析 stats
+    local files_total=0 files_xfer=0
+    local bytes_total_raw="0" bytes_sent_raw="0" bytes_recv_raw="0"
+    local list_secs="0"
+    if [ -s "$rsync_tmp" ]; then
+        local parsed
+        parsed=$(awk '
+            /^Number of files:/                     { files_total = $4 }
+            /^Number of regular files transferred:/ { files_xfer = $NF }
+            /^Total file size:/                     { bytes_total_raw = $4 }
+            /^Total bytes sent:/                    { bytes_sent_raw = $4 }
+            /^Total bytes received:/                { bytes_recv_raw = $4 }
+            /^File list generation time:/           { list_secs = $5 }
+            END {
+                if (files_total == "") files_total = 0;
+                if (files_xfer == "") files_xfer = 0;
+                if (bytes_total_raw == "") bytes_total_raw = 0;
+                if (bytes_sent_raw == "") bytes_sent_raw = 0;
+                if (bytes_recv_raw == "") bytes_recv_raw = 0;
+                if (list_secs == "") list_secs = 0;
+                printf "%d %d %s %s %s %s\n",
+                    files_total, files_xfer,
+                    bytes_total_raw, bytes_sent_raw, bytes_recv_raw, list_secs
+            }
+        ' "$rsync_tmp")
+        read -r files_total files_xfer bytes_total_raw bytes_sent_raw bytes_recv_raw list_secs <<<"$parsed"
+    fi
+    rm -f "$rsync_tmp"
+
+    local bytes_total bytes_sent bytes_recv list_ms prep_ms rsync_ms dur_ms
+    bytes_total=$(to_bytes "$bytes_total_raw")
+    bytes_sent=$(to_bytes "$bytes_sent_raw")
+    bytes_recv=$(to_bytes "$bytes_recv_raw")
+    list_ms=$(awk -v s="${list_secs:-0}" 'BEGIN { printf "%d", s * 1000 }')
+    prep_ms=$(( (t_rsync_start - t_start) * 1000 ))
+    rsync_ms=$(( (t_end - t_rsync_start) * 1000 ))
+    dur_ms=$(( (t_end - t_start) * 1000 ))
+
+    local total_secs=$(( t_end - t_start ))
+    local total_dur
+    total_dur="$(format_duration $total_secs)"
+
     if [ $rsync_exit -eq 0 ]; then
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务 '$task_name' 成功完成。" | tee -a "$LOG_FILE"
+        echo "[STATS] task=$task_name files=$files_xfer/$files_total bytes_total=$bytes_total bytes_sent=$bytes_sent bytes_recv=$bytes_recv rsync_ms=$rsync_ms list_ms=$list_ms prep_ms=$prep_ms" | tee -a "$LOG_FILE"
+
+        LAST_STATS_FILES_XFER=$files_xfer
+        LAST_STATS_FILES_TOTAL=$files_total
+        LAST_STATS_BYTES_TOTAL=$bytes_total
+        LAST_STATS_BYTES_SENT=$bytes_sent
+        LAST_STATS_BYTES_RECV=$bytes_recv
+        LAST_STATS_RSYNC_MS=$rsync_ms
+        LAST_STATS_LIST_MS=$list_ms
+        LAST_STATS_RESULT="success"
+
+        write_stats_task "$task_name" "success" "$dur_ms" "$prep_ms" "$rsync_ms" "$list_ms" \
+            "$files_xfer" "$files_total" "$bytes_total" "$bytes_sent" "$bytes_recv"
+
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务 '$task_name' 成功完成（用时 ${total_dur}）。" | tee -a "$LOG_FILE"
+        echo "  文件: 传输 $files_xfer / 扫描 $files_total" | tee -a "$LOG_FILE"
+        echo "  总大小: $(format_bytes $bytes_total)" | tee -a "$LOG_FILE"
+        echo "  数据: 发送 $(format_bytes $bytes_sent) + 接收 $(format_bytes $bytes_recv)" | tee -a "$LOG_FILE"
+        if [ "$list_ms" -gt 0 ]; then
+            echo "  列表: 生成耗时 $(format_duration $((list_ms / 1000)))" | tee -a "$LOG_FILE"
+        fi
         return 0
     else
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务 '$task_name' 失败 (退出码: $rsync_exit)" | tee -a "$LOG_FILE"
+        LAST_STATS_RESULT="failed"
+        write_stats_task "$task_name" "failed" "$dur_ms" "$prep_ms" "$rsync_ms" "$list_ms" \
+            "$files_xfer" "$files_total" "$bytes_total" "$bytes_sent" "$bytes_recv"
+
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务 '$task_name' 失败 (退出码: $rsync_exit，用时 ${total_dur})" | tee -a "$LOG_FILE"
+        if [ "$files_total" -gt 0 ]; then
+            echo "  文件: 传输 $files_xfer / 扫描 $files_total" | tee -a "$LOG_FILE"
+        fi
         return 1
     fi
 }
 
 # ---------- 主执行 ----------
+SCRIPT_START=$(date +%s)
+
 echo "============================================================" | tee -a "$LOG_FILE"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 备份脚本启动 (PID: $$)" | tee -a "$LOG_FILE"
 echo "脚本路径: $SCRIPT_PATH" | tee -a "$LOG_FILE"
 echo "配置文件: $CONFIG_FILE" | tee -a "$LOG_FILE"
 echo "远程主机: ${SSH_USER}@${HOST}:${SSH_PORT}" | tee -a "$LOG_FILE"
+echo "统计文件: $STATS_FILE" | tee -a "$LOG_FILE"
 
 if [ $NO_MOUNT_CHECK -eq 1 ]; then
     echo "挂载门禁: 已禁用 (--no-mount-check)" | tee -a "$LOG_FILE"
@@ -833,10 +1089,6 @@ if [ "$RUN_MODE" = "temp" ]; then
     [ -n "$TEMP_OPTS" ] && echo "  额外选项: $TEMP_OPTS" | tee -a "$LOG_FILE"
     [ $TEMP_DELETE -eq 1 ] && echo "  删除模式: 启用" | tee -a "$LOG_FILE"
     [ $TEMP_REMOVE_SOURCE -eq 1 ] && echo "  源端删除: 启用" | tee -a "$LOG_FILE"
-    [ -n "$TEMP_REQUIRE_MOUNTED" ] && echo "  挂载门禁: require_mounted=$TEMP_REQUIRE_MOUNTED" | tee -a "$LOG_FILE"
-    [ -n "$TEMP_REQUIRE_UNMOUNTED" ] && echo "  挂载门禁: require_unmounted=$TEMP_REQUIRE_UNMOUNTED" | tee -a "$LOG_FILE"
-    [ -n "$TEMP_MOUNT_POINT" ] && echo "  挂载点: $TEMP_MOUNT_POINT" | tee -a "$LOG_FILE"
-    [ -n "$TEMP_MOUNT_FSTYPE" ] && echo "  挂载类型: $TEMP_MOUNT_FSTYPE" | tee -a "$LOG_FILE"
 else
     if [ $CHECK_MOUNT_ONLY -eq 1 ]; then
         echo "模式: 仅挂载检查 (--check-mount)" | tee -a "$LOG_FILE"
@@ -870,6 +1122,14 @@ failed_tasks=()
 skipped_tasks=()
 mount_failed_tasks=()
 
+TOTAL_FILES_XFER=0
+TOTAL_FILES_SCAN=0
+TOTAL_BYTES_TOTAL=0
+TOTAL_BYTES_SENT=0
+TOTAL_BYTES_RECV=0
+TOTAL_RSYNC_MS=0
+TOTAL_LIST_MS=0
+
 if [ "$RUN_MODE" = "temp" ]; then
     delete_flag="no"; [ $TEMP_DELETE -eq 1 ] && delete_flag="yes"
     remove_flag="no"; [ $TEMP_REMOVE_SOURCE -eq 1 ] && remove_flag="yes"
@@ -880,7 +1140,16 @@ if [ "$RUN_MODE" = "temp" ]; then
         "$TEMP_REQUIRE_MOUNTED" "$TEMP_REQUIRE_UNMOUNTED" \
         "$TEMP_MOUNT_POINT" "$TEMP_MOUNT_FSTYPE" || rc=$?
     case $rc in
-        0) success_tasks+=("__temp__") ;;
+        0)
+            success_tasks+=("__temp__")
+            TOTAL_FILES_XFER=$((TOTAL_FILES_XFER + LAST_STATS_FILES_XFER))
+            TOTAL_FILES_SCAN=$((TOTAL_FILES_SCAN + LAST_STATS_FILES_TOTAL))
+            TOTAL_BYTES_TOTAL=$((TOTAL_BYTES_TOTAL + LAST_STATS_BYTES_TOTAL))
+            TOTAL_BYTES_SENT=$((TOTAL_BYTES_SENT + LAST_STATS_BYTES_SENT))
+            TOTAL_BYTES_RECV=$((TOTAL_BYTES_RECV + LAST_STATS_BYTES_RECV))
+            TOTAL_RSYNC_MS=$((TOTAL_RSYNC_MS + LAST_STATS_RSYNC_MS))
+            TOTAL_LIST_MS=$((TOTAL_LIST_MS + LAST_STATS_LIST_MS))
+            ;;
         1) failed_tasks+=("__temp__") ;;
         2) skipped_tasks+=("__temp__") ;;
         3) mount_failed_tasks+=("__temp__") ;;
@@ -900,6 +1169,7 @@ else
         if [ -z "$src" ] || [ -z "$dst" ]; then
             echo "错误：任务 '$task_name' 缺少 src 或 dst，跳过。" | tee -a "$LOG_FILE"
             failed_tasks+=("$task_name")
+            write_stats_task "$task_name" "failed" 0 0 0 0 0 0 0 0 0
             continue
         fi
         if [ -z "$delete_flag" ]; then
@@ -921,13 +1191,26 @@ else
             "$require_mounted" "$require_unmounted" \
             "$mount_point" "$mount_fstype" || rc=$?
         case $rc in
-            0) success_tasks+=("$task_name") ;;
+            0)
+                success_tasks+=("$task_name")
+                TOTAL_FILES_XFER=$((TOTAL_FILES_XFER + LAST_STATS_FILES_XFER))
+                TOTAL_FILES_SCAN=$((TOTAL_FILES_SCAN + LAST_STATS_FILES_TOTAL))
+                TOTAL_BYTES_TOTAL=$((TOTAL_BYTES_TOTAL + LAST_STATS_BYTES_TOTAL))
+                TOTAL_BYTES_SENT=$((TOTAL_BYTES_SENT + LAST_STATS_BYTES_SENT))
+                TOTAL_BYTES_RECV=$((TOTAL_BYTES_RECV + LAST_STATS_BYTES_RECV))
+                TOTAL_RSYNC_MS=$((TOTAL_RSYNC_MS + LAST_STATS_RSYNC_MS))
+                TOTAL_LIST_MS=$((TOTAL_LIST_MS + LAST_STATS_LIST_MS))
+                ;;
             1) failed_tasks+=("$task_name") ;;
             2) skipped_tasks+=("$task_name") ;;
             3) mount_failed_tasks+=("$task_name") ;;
         esac
     done
 fi
+
+SCRIPT_END=$(date +%s)
+SCRIPT_ELAPSED=$((SCRIPT_END - SCRIPT_START))
+SCRIPT_DURATION="$(format_duration $SCRIPT_ELAPSED)"
 
 echo "============================================================" | tee -a "$LOG_FILE"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 汇总:" | tee -a "$LOG_FILE"
@@ -955,6 +1238,34 @@ if [ ${#mount_failed_tasks[@]} -gt 0 ]; then
 else
     echo "  挂载门禁失败 0" | tee -a "$LOG_FILE"
 fi
+
+echo "  总用时: $SCRIPT_DURATION" | tee -a "$LOG_FILE"
+
+if [ $TOTAL_FILES_SCAN -gt 0 ] || [ $TOTAL_BYTES_SENT -gt 0 ]; then
+    echo "  传输统计:" | tee -a "$LOG_FILE"
+    echo "    文件:   $TOTAL_FILES_XFER / $TOTAL_FILES_SCAN" | tee -a "$LOG_FILE"
+    echo "    总大小: $(format_bytes $TOTAL_BYTES_TOTAL)" | tee -a "$LOG_FILE"
+    echo "    数据:   发送 $(format_bytes $TOTAL_BYTES_SENT) + 接收 $(format_bytes $TOTAL_BYTES_RECV)" | tee -a "$LOG_FILE"
+    if [ $TOTAL_RSYNC_MS -gt 0 ]; then
+        echo "    速率:   平均 $(format_rate $((TOTAL_BYTES_SENT + TOTAL_BYTES_RECV)) "$TOTAL_RSYNC_MS")" | tee -a "$LOG_FILE"
+    fi
+    if [ $TOTAL_LIST_MS -gt 0 ]; then
+        echo "    列表:   累计生成耗时 $(format_duration $((TOTAL_LIST_MS / 1000)))" | tee -a "$LOG_FILE"
+    fi
+fi
+
+# 追加 summary 到统计文件（英文展示字段）
+{
+    echo "[summary]"
+    echo "tasks=success ${#success_tasks[@]} / skipped ${#skipped_tasks[@]} / failed ${#failed_tasks[@]} / mount_failed ${#mount_failed_tasks[@]}"
+    echo "duration=$(format_duration $SCRIPT_ELAPSED)"
+    echo "files=$TOTAL_FILES_XFER / $TOTAL_FILES_SCAN"
+    echo "total_size=$(format_bytes $TOTAL_BYTES_TOTAL)"
+    echo "data=sent $(format_bytes $TOTAL_BYTES_SENT) + received $(format_bytes $TOTAL_BYTES_RECV)"
+    echo "rate=$(format_rate $((TOTAL_BYTES_SENT + TOTAL_BYTES_RECV)) "$TOTAL_RSYNC_MS")"
+    echo "rsync=$(format_duration $((TOTAL_RSYNC_MS / 1000)))"
+    echo "list=$(format_duration $((TOTAL_LIST_MS / 1000)))"
+} >> "$STATS_FILE"
 
 if [ ${#failed_tasks[@]} -gt 0 ]; then
     exit 1

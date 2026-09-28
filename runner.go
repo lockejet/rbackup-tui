@@ -3,22 +3,72 @@ package main
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 )
+
+type TaskStats struct {
+	FilesTransferred int
+	FilesTotal       int
+	BytesTotal       int64
+	BytesSent        int64
+	BytesReceived    int64
+	RsyncMS          int64
+	ListMS           int64
+	PrepMS           int64
+}
 
 type TaskResult struct {
 	TaskName string
 	ExitCode int
 	Err      error
+	Stats    *TaskStats
+}
+
+// 解析 rbackup.sh 输出的 [STATS] 行
+func parseStatsLine(line string) *TaskStats {
+	if !strings.HasPrefix(line, "[STATS] ") {
+		return nil
+	}
+	s := &TaskStats{}
+	fields := strings.Fields(line)
+	for _, f := range fields {
+		kv := strings.SplitN(f, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		k, v := kv[0], kv[1]
+		switch k {
+		case "files":
+			parts := strings.SplitN(v, "/", 2)
+			if len(parts) == 2 {
+				s.FilesTransferred, _ = strconv.Atoi(parts[0])
+				s.FilesTotal, _ = strconv.Atoi(parts[1])
+			}
+		case "bytes_total":
+			s.BytesTotal, _ = strconv.ParseInt(v, 10, 64)
+		case "bytes_sent":
+			s.BytesSent, _ = strconv.ParseInt(v, 10, 64)
+		case "bytes_recv":
+			s.BytesReceived, _ = strconv.ParseInt(v, 10, 64)
+		case "rsync_ms":
+			s.RsyncMS, _ = strconv.ParseInt(v, 10, 64)
+		case "list_ms":
+			s.ListMS, _ = strconv.ParseInt(v, 10, 64)
+		case "prep_ms":
+			s.PrepMS, _ = strconv.ParseInt(v, 10, 64)
+		}
+	}
+	return s
 }
 
 // ---------- 查找 bash ----------
-// Windows 不能直接执行 .sh，必须通过 bash 解释器。
 func findBash() string {
 	if p := os.Getenv("RBACKUP_BASH"); p != "" {
 		return p
@@ -62,7 +112,15 @@ func StreamDryRun(ctx context.Context, scriptPath, configPath, taskName string, 
 func streamExec(ctx context.Context, scriptPath string, args []string, name string, onLine func(string)) *TaskResult {
 	bash := findBash()
 
-	// 用 bash 执行 .sh 脚本
+	// 脚本路径验证
+	if scriptPath == "" {
+		return &TaskResult{TaskName: name, ExitCode: -1, Err: fmt.Errorf("脚本路径为空")}
+	}
+	if _, err := os.Stat(scriptPath); err != nil {
+		return &TaskResult{TaskName: name, ExitCode: -1,
+			Err: fmt.Errorf("脚本不存在: %s", scriptPath)}
+	}
+
 	fullArgs := append([]string{scriptPath}, args...)
 	cmd := exec.CommandContext(ctx, bash, fullArgs...)
 
@@ -82,6 +140,11 @@ func streamExec(ctx context.Context, scriptPath string, args []string, name stri
 		return result
 	}
 
+	var (
+		statsMu     sync.Mutex
+		parsedStats *TaskStats
+	)
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -90,8 +153,16 @@ func streamExec(ctx context.Context, scriptPath string, args []string, name stri
 		scanner := bufio.NewScanner(r)
 		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 		for scanner.Scan() {
+			line := scanner.Text()
+			// 拦截 [STATS] 行，不传给 UI
+			if s := parseStatsLine(line); s != nil {
+				statsMu.Lock()
+				parsedStats = s
+				statsMu.Unlock()
+				continue
+			}
 			if onLine != nil {
-				onLine(scanner.Text())
+				onLine(line)
 			}
 		}
 	}
@@ -110,6 +181,11 @@ func streamExec(ctx context.Context, scriptPath string, args []string, name stri
 	} else {
 		result.ExitCode = 0
 	}
+
+	statsMu.Lock()
+	result.Stats = parsedStats
+	statsMu.Unlock()
+
 	return result
 }
 
