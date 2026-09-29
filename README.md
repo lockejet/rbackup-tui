@@ -6,7 +6,7 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 - TUI 框架: tview + tcell
 - 后端: rbackup.sh
 - 平台: Linux、Windows (MSYS2)
-- 当前版本: v1.1.3
+- 当前版本: v1.1.5
 
 ---
 
@@ -44,8 +44,9 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 - 数据统计：文件数、总大小、发送/接收字节、平均速率
 - 独立统计文件：与日志同目录，同名不同后缀（.stats）
 - 错误摘要：失败任务自动提取错误行
-- 等效命令：任务详情区实时显示将要执行的 rsync 命令
-- 焦点切换：任务区 / 交互区
+- 等效命令：命令区实时显示将要执行的 rsync 命令（支持横滚）
+- 三焦点区：信息区 / 任务区 / 交互区，Tab 循环切换
+- 三行状态栏：状态 / 当前焦点按键 / 全局按键
 - 帮助浮层：F1 或 ?
 - 版本信息：编译时通过 -ldflags 注入 git 版本
 
@@ -53,39 +54,107 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 
 ## 界面说明
 
-以 config1.ini.example 为例：
+以 config1.ini.example 为例（终端高度 >= 31 行时完整显示）：
 
     ┌─ rbackup ─────────────────────────────────────────────────────────────────────┐
-    │ 脚本: ~/rbackup/rbackup.sh  |  配置: config1.ini  |  策略: skip（门禁失败时跳过）│
-    │ 远端: admin@example.com:22  |  日志: ~/rbackup/log/rbackup_20260928_1922.log  |  统计: ~/rbackup/log/rbackup_20260928_1922.stats │
-    ├─ [1] 任务列表 [Tab/1] ────────────────────────────────────────────────────────┤
-    │  ● alice          /d/alice/my_company/  → /srv/.../doc-alice                  │
-    │  ● bob            /d/bob/my_company/    → /srv/.../doc-bob                    │
-    │  ○ charlie        /d/charlie/DevOps     → /srv/st1000dm                       │
-    │  ○ Test1          ~/rsync/test1.d/      → /srv/st1000dm/t1                    │
-    │  ○ Test2          ~/rsync/test2.d/      → /srv/st1000dm/t2                    │
+    │ 脚本: ~/rbackup/rbackup.sh  配置: config1.ini  策略: skip（门禁失败时跳过）    │
+    │ 远端: admin@example.com:22  日志: ~/rbackup/log/rbackup_20260928_1922.log  统计: ~/rbackup/log/rbackup_20260928_1922.stats │
+    ├─ [2] 任务列表 ────────────────────────────────────────────────────────────────┤
+    │  ● 任务名         源                              目标              门禁       │
+    │  ● alice          /d/alice/my_company/            /srv/.../doc-alice  已挂载    │
+    │  ● bob            /d/bob/my_company/              /srv/.../doc-bob    已挂载    │
+    │  ○ charlie        /d/charlie/DevOps               /srv/st1000dm        —        │
+    │  ○ Test1          ~/rsync/test1.d/                /srv/st1000dm/t1    已挂载    │
+    │  ○ Test2          ~/rsync/test2.d/                /srv/st1000dm/t2    未挂载    │
     │                                                                                │
-    │ 任务数: 5  已选择: 2  alice bob                                                │
-    │ 选择[空格]  全选[a]  全不选[n]  运行[Enter]  预览[d]  挂载[m]  刷新[r]           │
-    │ 移动[↑↓/j/k]  翻页[PgUp/PgDn]  首尾[Home/End/g/G]                              │
-    │ 命令: rsync -avzhu --progress --delete ...                                     │
-    ├─ [2] 交互区 [Tab/2] ──────────────────────────────────────────────────────────┤
-    │ 模式: 实际执行   进度: 2/5   当前: bob   成功 1  跳过 0  失败 0  挂载门禁失败 0 │
-    │ [2026-01-01 10:00:15] 任务: bob                                                │
-    │   sending incremental file list                                                │
-    │   ...                                                                          │
-    │ 滚动[↑↓/j/k]  翻页[PgUp/PgDn]  首尾[Home/End/g/G]  暂停[p/空格]                │
+    │  > 命令: rsync -avzhu --progress --delete --exclude='/.deleted_files/'         │
+    │    --backup --backup-dir="/srv/.../rbackup/<ts>" -e "ssh -p 22 -i ..." ...     │
+    ├─ [3] 交互区 ──────────────────────────────────────────────────────────────────┤
+    │ [2026-09-28 19:24:10] 开始实际执行：共 2 个任务                                 │
+    │ >>> [1/2] alice 成功    用时: 47s    累积: 成功 1  跳过 0  失败 0  挂载门禁失败 0│
+    │       传输: 文件: 8/463  总大小: 26.00M  数据: 发送 28.97K + 接收 330B  速率: 661.60 KB/s  列表: 3s  执行: 45s │
+    │ ...                                                                            │
     ├────────────────────────────────────────────────────────────────────────────────┤
-    │ 就绪  |  已选: 2/5  |  交互: 同步中 (2/5)  |  焦点: 任务区                     │
-    │ 切换焦点[Tab/1/2]  退出[q/Esc/Ctrl+C]  强制退出[Ctrl+D×3]  帮助[F1/?]           │
+    │ 运行中   进度 2/5   当前 bob   成功 1 跳过 0 失败 0 挂载门禁失败 0   用时 1min32s│
+    │ 滚动: 移动[↑↓/jk] 横滚[←→/hl] 翻页[PgUp/PgDn] 纵首尾[g/G] 横首尾[0/$]  选择: 勾选[空格] 全选[a] 清空[n]  执行: 运行[Enter] 预览[d] 挂载检查[m] 刷新[r] │
+    │ 全局: 切换[Tab] 直选[1/2/3] 停止[Ctrl+C] 强退[Ctrl+D×3] 退出[q] 帮助[F1/?]     │
     └────────────────────────────────────────────────────────────────────────────────┘
 
-**顶部两行**：
+### 布局尺寸
+
+    header              4 行 (边框 2 + 内容 2)
+    tableArea           权重 3 (边框 2 + 表格 + 命令区 2)
+    interact            权重 2 (边框 2 + 日志)
+    状态栏              3 行
+    合计                约 31 行
+
+### 焦点区（3 个）
+
+| 编号 | 区域 | 边框色（焦点时） | 说明 |
+|---|---|---|---|
+| 1 | 信息区 (header) | 绿色 | 顶部两行信息，支持横滚 |
+| 2 | 任务区 (table) | 绿色 | 任务表格 + 命令区 |
+| 3 | 交互区 (interact) | 绿色 | 实时日志，支持横滚 |
+
+切换方式：`Tab` 循环 1→2→3→1；`1` / `2` / `3` 直选。
+
+### 状态栏（3 行）
+
+- **第 1 行**：状态 + 进度 + 累积统计（危险确认时红/黄闪烁）
+- **第 2 行**：当前焦点区的按键提示（分类显示）
+- **第 3 行**：全局按键（固定显示）
+
+### 顶部信息
 
 - 第一行：脚本路径、配置文件、挂载策略（含中文描述）
 - 第二行：远端主机、日志文件、统计文件
 
 所有路径自动将 `$HOME` 前缀缩写为 `~`。
+
+---
+
+## v1.1.5 变更
+
+### UI 重构
+
+- 焦点区从 2 个扩展为 3 个：**信息区(1) / 任务区(2) / 交互区(3)**
+- 底部状态栏从 1 行扩展为 3 行（状态 / 焦点按键 / 全局按键）
+- 新增**命令区**（固定 2 行，显示完整 rsync 命令，独立横滚）
+- header 与各区域支持**独立横向滚动**（`←→ / h l`）
+- 危险确认改为**状态栏第 1 行闪烁**（红/黄 500ms 交替），不再闪 interact 边框
+- 分隔线统一为 **80 个短横线**
+
+### 按键扩展（vim 风格）
+
+| 键 | 作用 |
+|---|---|
+| `g` / `G` / `Home` / `End` | 纵向首行 / 末行 |
+| `0` / `$` | 横向行首 / 行尾 |
+| `← →` / `h l` | 横向滚动一列 |
+| `↑ ↓` / `j k` | 纵向滚动一行 |
+
+### 输出格式统一
+
+- 头部信息去掉 `|` 分隔符，改用 2 空格
+- 命令前缀 `●` 改为 `>`
+- 单任务日志：4 行 → 2 行，字段顺序：**文件 → 总大小 → 数据 → 速率 → 列表 → 执行**
+- 汇总日志：10+ 行 → 3 行（分隔线 + 完成状态 + 统计行）
+- 传输字段统一加冒号：`文件: N/M  总大小: xx  数据: ...  速率: ...  列表: ...  执行: ...`
+
+### rbackup.sh 变更
+
+- 统计文件与日志文件同目录、同前缀、不同后缀（`.log` / `.stats`）
+- 任务完成/失败时写入 `[task]` 块（成功/失败/跳过/挂载门禁失败均写）
+- 脚本结束写入 `[summary]` 块
+- 输出 `[STATS]` 单行协议供 TUI 解析
+- 新增 `format_rate` 函数（`X.XX KB/s`）
+- 时长格式：`47s` 或 `3min15s`
+- 解析 rsync `--stats` 输出：文件数、总大小、发送/接收字节、列表生成时间
+
+### Bug 修复
+
+- 修复 `Enter` / `d` 进入危险确认后 TUI 死锁（`startStatusBlink` 首次渲染改为异步）
+- 修复状态栏按键提示 `[a]` `[n]` `[Enter]` 被 tview 当颜色标签吞掉（改用 `tview.Escape`）
 
 ---
 
@@ -186,9 +255,9 @@ MOUNT_POLICY 取值：
 | opts | 任务级 rsync 附加选项 |
 | delete | yes / no，启用回收站模式 |
 | remove_source | yes / no，同步后删除源文件 |
-| require_mounted | yes，要求 mount_point 已挂载（新键） |
-| require_unmounted | yes，要求 mount_point 未挂载（新键） |
-| mount_point | 要检查的挂载点（新键，省略时默认取 dst） |
+| require_mounted | yes，要求 mount_point 已挂载 |
+| require_unmounted | yes，要求 mount_point 未挂载 |
+| mount_point | 要检查的挂载点（省略时默认取 dst） |
 | mount_fstype | require_mounted 时的期望类型 |
 
 兼容旧键：
@@ -319,7 +388,7 @@ rsync 只允许 `--chown` 出现一次。可以放在：
     SSH_PORT=22
     SSH_KEY=/home/admin/.ssh/id_ed25519
 
-    # 日志目录（自动生成 ${SCRIPT_NAME}_${DATE}.log）
+    # 日志目录（自动生成 ${SCRIPT_NAME}_${DATE}.log 与 .stats）
     LOG_DIR=/var/log
 
     # 全局 rsync 默认选项（可被任务级 opts 追加覆盖）
@@ -432,8 +501,8 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 2. 空格选择要备份的任务
 3. Enter 运行
 4. 如有危险操作，逐个确认（y/n/a/s）
-5. 观察实时日志
-6. 完成后按 Tab 切到交互区翻页查看
+5. 观察实时日志（焦点自动切到交互区）
+6. 完成后按 Tab 切换焦点查看各区
 
 ---
 
@@ -444,36 +513,67 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 | 键 | 功能 |
 |---|---|
 | F1 / ? | 显示 / 关闭帮助 |
-| Tab / 1 / 2 | 切换焦点 |
+| Tab | 循环切焦点 (1→2→3→1) |
+| 1 / 2 / 3 | 直选焦点（信息 / 任务 / 交互） |
 | Ctrl+D ×3 | 强制退出程序 |
 
-### 空闲（无运行、无确认）
+### 焦点 1：信息区（header）
 
-| 键 | 任务区 | 交互区 |
-|---|---|---|
-| ↑ ↓ / j k | 移动光标 | 滚动日志 |
-| PgUp / PgDn | 翻页 | 翻页 |
-| Home / End / g G | 首 / 尾 | 首 / 尾 |
-| 空格 | 选择 | 暂停 |
-| a / n | 全选 / 全不选 | — |
-| Enter | 运行 | — |
-| d | 预览 | — |
-| m | 挂载检查 | — |
-| r | 刷新配置 | — |
-| q / Esc / Ctrl+C | 退出 | 退出 |
+| 键 | 功能 |
+|---|---|
+| ← → / h l | 横向滚动 |
+| ↑ ↓ / j k | 纵向滚动（保留） |
+| PgUp / PgDn | 翻页 |
+| g / G / Home / End | 纵向首行 / 末行 |
+| 0 / $ | 横向行首 / 行尾 |
 
-### 运行中
+### 焦点 2：任务区（table + 命令区）
+
+| 键 | 功能 |
+|---|---|
+| ↑ ↓ / j k | 移动光标 |
+| ← → / h l | 命令区横向滚动 |
+| PgUp / PgDn | 翻页 |
+| g / G / Home / End | 首行 / 末行 |
+| 0 / $ | 命令区行首 / 行尾 |
+| 空格 | 选择 / 取消选择 |
+| a / n | 全选 / 全不选 |
+| Enter | 运行选中任务 |
+| d | 预览（dry-run） |
+| m | 挂载检查 |
+| r | 刷新配置 |
+
+### 焦点 3：交互区（interact）
+
+| 键 | 功能 |
+|---|---|
+| ↑ ↓ / j k | 滚动日志 |
+| ← → / h l | 横向滚动 |
+| PgUp / PgDn | 翻页 |
+| g / G / Home / End | 纵向首行 / 末行 |
+| 0 / $ | 横向行首 / 行尾 |
+| p / 空格 | 暂停 / 继续自动滚动 |
+| Esc | 切回任务区焦点 |
+
+### 空闲状态（无运行、无确认）
+
+| 键 | 功能 |
+|---|---|
+| q | 退出程序 |
+| Esc | 退出程序 / 交互区焦点切回任务区 |
+| Ctrl+C | 退出程序 |
+
+### 运行中（任何焦点）
 
 | 键 | 功能 |
 |---|---|
 | Ctrl+C | 停止任务 |
 | p / 空格 | 暂停 / 继续自动滚动 |
-| ↑ ↓ / j k | 滚动日志 |
+| ↑↓←→ / j k h l | 滚动 |
 | PgUp / PgDn | 翻页 |
-| Home / End / g G | 首 / 尾 |
-| Esc / q | 无效 |
+| Tab | 切焦点 |
 
-### 危险确认
+### 危险确认中（交互区焦点）
 
 | 键 | 功能 |
 |---|---|
@@ -482,8 +582,7 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 | a | 全部确认 |
 | s | 全部跳过 |
 | Ctrl+C | 全部跳过 |
-| ↑ ↓ / PgUp / PgDn | 滚动详情 |
-| Esc / q | 无效 |
+| ↑↓←→ / PgUp / PgDn | 滚动确认详情 |
 
 ---
 
@@ -538,14 +637,14 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 
     /srv/st1000dm -> /srv/dev-disk-by-id-ata-xxx-part1
 
-直接比较字符串会误判“未挂载”。rbackup.sh 在远端一次 SSH 完成：
+直接比较字符串会误判"未挂载"。rbackup.sh 在远端一次 SSH 完成：
 
 1. `realpath -m <mount_point>` 解析软链接
 2. `findmnt -T <真实路径>` 查询挂载信息
 3. `realpath -m <TARGET>` 再解析一遍
 4. 比较两个真实路径
 
-这样即使 mount_point 和 findmnt 返回的路径写法不同，只要指向同一位置，就判定“已挂载”。
+这样即使 mount_point 和 findmnt 返回的路径写法不同，只要指向同一位置，就判定"已挂载"。
 
 ---
 
@@ -606,8 +705,9 @@ key=value 纯文本，分组结构。全部为展示字段（英文单位），�
 | rate | 平均速率（按 rsync 耗时计算） |
 | prep | 准备阶段耗时（挂载检查、目录创建等） |
 
-**时间格式**：`47s` 或 `3min15s`  
+**时间格式**：`47s` 或 `3min15s`
 **字节格式**：`B` / `K` / `M` / `G`（2 位小数）
+**速率格式**：`X.XX KB/s`
 
 ### 用命令行读取统计
 
@@ -630,30 +730,26 @@ key=value 纯文本，分组结构。全部为展示字段（英文单位），�
 
 ### 运行时长与数据
 
-TUI 里每个任务完成后显示 3~4 行详情：
+TUI 里每个任务完成后显示 **2 行**详情：
 
     >>> [1/5] infra_secrets_cipher 成功    用时: 47s    累积: 成功 1  跳过 0  失败 0  挂载门禁失败 0
-          文件: 8 / 463    总大小: 26.00M
-          数据: 发送 28.97K + 接收 330B    rsync: 45s
-          列表: 生成耗时 3s
+          传输: 文件: 8/463  总大小: 26.00M  数据: 发送 28.97K + 接收 330B  速率: 661.60 KB/s  列表: 3s  执行: 45s
 
-最终汇总包含传输统计块：
+最终汇总包含 **3 行**（含分隔线）：
 
-    ════════════════════════════════════════════════════════
-     [2026-09-28 19:24:10] 全部任务完成（总用时 3min15s）
-     成功 2: infra_secrets_cipher Work_Cipher
-     跳过 0
-     失败 0
-     挂载门禁失败 0
+    --------------------------------------------------------------------------------
+    [2026-09-28 19:24:10] 全部任务完成（总用时 3min15s）
+      成功 2: infra_secrets_cipher Work_Cipher  跳过 0  失败 0  挂载门禁失败 0
+      传输: 文件: 16/926  总大小: 52.50M  数据: 发送 58.25K + 接收 660B  速率: 305.60 KB/s  列表: 6s  执行: 1min36s
+    --------------------------------------------------------------------------------
 
-     传输统计:
-       文件:   16 / 926
-       总大小: 52.50M
-       数据:   发送 58.25K + 接收 660B
-       速率:   平均 305.60 KB/s
-       列表:   累计生成耗时 6s
-     总用时: 3min15s
-    ════════════════════════════════════════════════════════
+rbackup.sh 日志文件中的对应输出格式一致（字段顺序：文件 → 总大小 → 数据 → 速率 → 列表 → 执行）。
+
+### 分隔线
+
+- **rbackup.sh 输出**：80 个短横线（`-`），用于脚本启动、任务边界、rsync 阶段分隔
+- **TUI 危险确认**：80 个短横线，上下包裹确认详情
+- **TUI 汇总**：80 个短横线，上下包裹汇总块
 
 ### 退出码
 
@@ -668,9 +764,9 @@ TUI 里每个任务完成后显示 3~4 行详情：
 
 ## 常见问题排查
 
-### 挂载检查误报“未挂载”
+### 挂载检查误报"未挂载"
 
-**现象**：手动执行 `findmnt -T <path>` 返回正确结果，但 rbackup.sh 报“未挂载”。
+**现象**：手动执行 `findmnt -T <path>` 返回正确结果，但 rbackup.sh 报"未挂载"。
 
 **原因**：路径中含软链接，`findmnt` 返回真实路径，与配置的 mount_point 字符串不相等。
 
@@ -684,7 +780,7 @@ TUI 里每个任务完成后显示 3~4 行详情：
 
 **解决**：rbackup.sh 已内置 realpath 解析，无需额外处理。如果仍报错，检查 rbackup.sh 是否为最新版本。
 
-### rsync 报“failed to set times”
+### rsync 报"failed to set times"
 
 **现象**：
 
@@ -697,7 +793,7 @@ TUI 里每个任务完成后显示 3~4 行详情：
 
     GLOBAL_OPTS=-avzhu --progress --no-perms --omit-dir-times --chown=admin:users --update --delete-after
 
-### rsync 报“You can only specify a user-affecting --chown once”
+### rsync 报"You can only specify a user-affecting --chown once"
 
 **原因**：`--chown` 在 GLOBAL_OPTS 和任务 opts 里各写了一次。
 
@@ -705,7 +801,7 @@ TUI 里每个任务完成后显示 3~4 行详情：
 
     grep -n "\-\-chown" config1.ini
 
-### rsync 报“Permission denied (13)”
+### rsync 报"Permission denied (13)"
 
 **现象**：
 
@@ -766,7 +862,7 @@ Makefile 会自动注入版本：
 - `BUILD_VERSION`：含 commit hash 和 dirty 标记，用于二进制内部（帮助浮层显示）
 - `VERSION`：纯 tag，用于文件名和 Release 版本号
 
-打 tag 后版本号显示为 `v1.1.3`，未打 tag 显示 `dev`。
+打 tag 后版本号显示为 `v1.1.5`，未打 tag 显示 `dev`。
 
 ---
 
@@ -778,9 +874,9 @@ Makefile 会自动注入版本：
 
 生成三个压缩包到 `dist/`：
 
-    rbackup-tui-v1.1.3-linux-amd64.tar.gz
-    rbackup-tui-v1.1.3-linux-arm64.tar.gz
-    rbackup-tui-v1.1.3-windows-amd64.zip
+    rbackup-tui-v1.1.5-linux-amd64.tar.gz
+    rbackup-tui-v1.1.5-linux-arm64.tar.gz
+    rbackup-tui-v1.1.5-windows-amd64.zip
 
 每个压缩包内含：
 
@@ -808,10 +904,10 @@ Makefile 会自动注入版本：
     git push
 
     # 2. 手动打 tag
-    git tag -a v1.1.4 -m "v1.1.4: ..."
+    git tag -a v1.1.5 -m "v1.1.5: ..."
 
     # 3. 推送 tag
-    git push origin v1.1.4
+    git push origin v1.1.5
 
     # 4. 打包 + 创建 Release + 上传
     make release
@@ -829,13 +925,13 @@ Makefile 会自动注入版本：
 ### 其他发布命令
 
     # 只上传附件（重新编译后覆盖）
-    make release-upload VERSION=v1.1.4
+    make release-upload VERSION=v1.1.5
 
     # 只生成 notes 文件查看
-    make release-notes VERSION=v1.1.4
+    make release-notes VERSION=v1.1.5
 
     # 删除 Release（保留 tag）
-    make release-delete VERSION=v1.1.4
+    make release-delete VERSION=v1.1.5
 
 ### 参数
 
@@ -855,7 +951,6 @@ Makefile 会自动注入版本：
 | RBACKUP_SCRIPT | rbackup.sh 路径 | 自动查找 |
 | RBACKUP_BASH | bash 可执行文件路径 | 自动查找 |
 | RBACKUP_DEBUG_KEYS | 设为 1 输出按键调试日志 | — |
-| RBACKUP_SEP | 分隔线字符 | ┄ |
 
 ---
 
@@ -908,6 +1003,26 @@ rbackup.sh 会自动回退到脚本同目录的 log/。
 ### 统计文件去哪了？
 
 与日志同目录，同名不同后缀。TUI 顶部显示完整路径。
+
+### 状态栏按键提示方括号 `[a]` 显示不出来？
+
+老版本问题，v1.1.5 起已修复（改用 `tview.Escape`）。
+
+### 按 Enter / d 后 TUI 卡死？
+
+老版本问题，v1.1.5 起已修复（危险确认闪烁首次渲染改为异步）。
+
+### 命令太长显示不全？
+
+命令区固定 2 行，超长命令自动截断。用 `←→/hl` 横滚，`0/$` 跳到行首/行尾。
+
+### 日志行太长看不全？
+
+用 `←→/hl` 横滚，`0/$` 跳到行首/行尾。
+
+### 想看终端首行/末行？
+
+纵向用 `g/G`（同 `Home/End`），横向用 `0/$`。
 
 ---
 
