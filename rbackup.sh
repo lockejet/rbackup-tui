@@ -18,6 +18,9 @@ while [ -L "$SCRIPT_PATH" ]; do
 done
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 
+# ---------- 80 个短横线分隔符 ----------
+SEP80="--------------------------------------------------------------------------------"
+
 # ---------- 默认配置 ----------
 DEFAULT_CONFIG="${SCRIPT_DIR}/config.ini"
 DEFAULT_HOST="localhost"
@@ -92,9 +95,6 @@ if [ -t 0 ] && [ -t 1 ]; then
 fi
 
 # ---------- 格式化工具 ----------
-# 秒数 → 人类可读（英文单位）
-#   < 60s : 47s
-#   >= 60s: 3min15s
 format_duration() {
     local secs="${1:-0}"
     if [ "$secs" -lt 0 ]; then
@@ -107,7 +107,6 @@ format_duration() {
     fi
 }
 
-# 字节 → 人类可读（国际通用单位）
 format_bytes() {
     local b="${1:-0}"
     if [ "$b" -lt 1024 ]; then
@@ -121,7 +120,6 @@ format_bytes() {
     fi
 }
 
-# 速率：字节 / 毫秒 → KB/s 字符串
 format_rate() {
     local bytes="${1:-0}" ms="${2:-0}"
     if [ "$ms" -le 0 ]; then
@@ -132,7 +130,6 @@ format_rate() {
         'BEGIN { printf "%.2f KB/s", b / 1024 / (ms / 1000) }'
 }
 
-# rsync 输出单元（26.00M / 28.97K / 330）→ 字节
 to_bytes() {
     local raw="${1:-0}"
     local num unit
@@ -153,7 +150,6 @@ to_bytes() {
     awk -v n="$num" -v m="$mul" 'BEGIN { printf "%d", n * m }'
 }
 
-# 追加单个任务到 stats 文件（全部为展示字段，英文）
 write_stats_task() {
     local name="$1" result="$2"
     local dur_ms="$3" prep_ms="$4" rsync_ms="$5" list_ms="$6"
@@ -516,7 +512,6 @@ if ! touch "$LOG_FILE" 2>/dev/null; then
     exit 1
 fi
 
-# 初始化统计文件（英文头部）
 {
     echo "# rbackup stats report"
     echo "# generated: $(date '+%Y-%m-%d %H:%M:%S')"
@@ -902,7 +897,7 @@ do_backup() {
     ts="$(date +%s)"
     local cmd="rsync $rsync_opts --suffix=\"_${ts}\" -e \"$ssh_cmd\" \"$src\" \"$full_dst\""
 
-    echo "========================================" | tee -a "$LOG_FILE"
+    echo "$SEP80" | tee -a "$LOG_FILE"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务: $task_name" | tee -a "$LOG_FILE"
     echo "  源: $src" | tee -a "$LOG_FILE"
     case "$src" in
@@ -978,7 +973,7 @@ do_backup() {
     local t_rsync_start
     t_rsync_start=$(date +%s)
 
-    echo "----------------------------------------" | tee -a "$LOG_FILE"
+    echo "$SEP80" | tee -a "$LOG_FILE"
 
     local rsync_tmp
     rsync_tmp=$(mktemp)
@@ -1030,6 +1025,13 @@ do_backup() {
     local total_dur
     total_dur="$(format_duration $total_secs)"
 
+    local rate_str
+    rate_str="$(format_rate $((bytes_sent + bytes_recv)) "$rsync_ms")"
+    local list_str
+    list_str="$(format_duration $((list_ms / 1000)))"
+    local rsync_str
+    rsync_str="$(format_duration $((rsync_ms / 1000)))"
+
     if [ $rsync_exit -eq 0 ]; then
         echo "[STATS] task=$task_name files=$files_xfer/$files_total bytes_total=$bytes_total bytes_sent=$bytes_sent bytes_recv=$bytes_recv rsync_ms=$rsync_ms list_ms=$list_ms prep_ms=$prep_ms" | tee -a "$LOG_FILE"
 
@@ -1045,13 +1047,8 @@ do_backup() {
         write_stats_task "$task_name" "success" "$dur_ms" "$prep_ms" "$rsync_ms" "$list_ms" \
             "$files_xfer" "$files_total" "$bytes_total" "$bytes_sent" "$bytes_recv"
 
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务 '$task_name' 成功完成（用时 ${total_dur}）。" | tee -a "$LOG_FILE"
-        echo "  文件: 传输 $files_xfer / 扫描 $files_total" | tee -a "$LOG_FILE"
-        echo "  总大小: $(format_bytes $bytes_total)" | tee -a "$LOG_FILE"
-        echo "  数据: 发送 $(format_bytes $bytes_sent) + 接收 $(format_bytes $bytes_recv)" | tee -a "$LOG_FILE"
-        if [ "$list_ms" -gt 0 ]; then
-            echo "  列表: 生成耗时 $(format_duration $((list_ms / 1000)))" | tee -a "$LOG_FILE"
-        fi
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务 '$task_name' 成功完成（用时 ${total_dur}）" | tee -a "$LOG_FILE"
+        echo "  传输: 文件: $files_xfer/$files_total  总大小: $(format_bytes $bytes_total)  数据: 发送 $(format_bytes $bytes_sent) + 接收 $(format_bytes $bytes_recv)  速率: $rate_str  列表: $list_str  执行: $rsync_str" | tee -a "$LOG_FILE"
         return 0
     else
         LAST_STATS_RESULT="failed"
@@ -1059,9 +1056,7 @@ do_backup() {
             "$files_xfer" "$files_total" "$bytes_total" "$bytes_sent" "$bytes_recv"
 
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] 任务 '$task_name' 失败 (退出码: $rsync_exit，用时 ${total_dur})" | tee -a "$LOG_FILE"
-        if [ "$files_total" -gt 0 ]; then
-            echo "  文件: 传输 $files_xfer / 扫描 $files_total" | tee -a "$LOG_FILE"
-        fi
+        echo "  传输: 文件: $files_xfer/$files_total  总大小: $(format_bytes $bytes_total)  数据: 发送 $(format_bytes $bytes_sent) + 接收 $(format_bytes $bytes_recv)  速率: $rate_str  列表: $list_str  执行: $rsync_str" | tee -a "$LOG_FILE"
         return 1
     fi
 }
@@ -1069,7 +1064,7 @@ do_backup() {
 # ---------- 主执行 ----------
 SCRIPT_START=$(date +%s)
 
-echo "============================================================" | tee -a "$LOG_FILE"
+echo "$SEP80" | tee -a "$LOG_FILE"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 备份脚本启动 (PID: $$)" | tee -a "$LOG_FILE"
 echo "脚本路径: $SCRIPT_PATH" | tee -a "$LOG_FILE"
 echo "配置文件: $CONFIG_FILE" | tee -a "$LOG_FILE"
@@ -1115,7 +1110,7 @@ if [ $FORCE_MODE -eq 1 ]; then
     echo "强制模式: 已启用（跳过所有交互确认）" | tee -a "$LOG_FILE"
 fi
 echo "日志文件: $LOG_FILE" | tee -a "$LOG_FILE"
-echo "============================================================" | tee -a "$LOG_FILE"
+echo "$SEP80" | tee -a "$LOG_FILE"
 
 success_tasks=()
 failed_tasks=()
@@ -1212,49 +1207,52 @@ SCRIPT_END=$(date +%s)
 SCRIPT_ELAPSED=$((SCRIPT_END - SCRIPT_START))
 SCRIPT_DURATION="$(format_duration $SCRIPT_ELAPSED)"
 
-echo "============================================================" | tee -a "$LOG_FILE"
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] 汇总:" | tee -a "$LOG_FILE"
+echo "$SEP80" | tee -a "$LOG_FILE"
 
-if [ ${#success_tasks[@]} -gt 0 ]; then
-    echo "  成功 ${#success_tasks[@]}: ${success_tasks[*]}" | tee -a "$LOG_FILE"
-else
-    echo "  成功 0" | tee -a "$LOG_FILE"
-fi
-
-if [ ${#skipped_tasks[@]} -gt 0 ]; then
-    echo "  跳过 ${#skipped_tasks[@]}: ${skipped_tasks[*]}" | tee -a "$LOG_FILE"
-else
-    echo "  跳过 0" | tee -a "$LOG_FILE"
-fi
-
+# 第 1 行：完成状态 + 总用时
 if [ ${#failed_tasks[@]} -gt 0 ]; then
-    echo "  失败 ${#failed_tasks[@]}: ${failed_tasks[*]}" | tee -a "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 有任务失败（总用时 $SCRIPT_DURATION）" | tee -a "$LOG_FILE"
+elif [ ${#mount_failed_tasks[@]} -gt 0 ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 有任务因挂载门禁失败（总用时 $SCRIPT_DURATION）" | tee -a "$LOG_FILE"
 else
-    echo "  失败 0" | tee -a "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 全部任务完成（总用时 $SCRIPT_DURATION）" | tee -a "$LOG_FILE"
 fi
 
+# 第 2 行：成功/跳过/失败/挂载门禁失败（带任务名）
+line2=""
+if [ ${#success_tasks[@]} -gt 0 ]; then
+    line2="成功 ${#success_tasks[@]}: ${success_tasks[*]}"
+else
+    line2="成功 0"
+fi
+if [ ${#skipped_tasks[@]} -gt 0 ]; then
+    line2="$line2  跳过 ${#skipped_tasks[@]}: ${skipped_tasks[*]}"
+else
+    line2="$line2  跳过 0"
+fi
+if [ ${#failed_tasks[@]} -gt 0 ]; then
+    line2="$line2  失败 ${#failed_tasks[@]}: ${failed_tasks[*]}"
+else
+    line2="$line2  失败 0"
+fi
 if [ ${#mount_failed_tasks[@]} -gt 0 ]; then
-    echo "  挂载门禁失败 ${#mount_failed_tasks[@]}: ${mount_failed_tasks[*]}" | tee -a "$LOG_FILE"
+    line2="$line2  挂载门禁失败 ${#mount_failed_tasks[@]}: ${mount_failed_tasks[*]}"
 else
-    echo "  挂载门禁失败 0" | tee -a "$LOG_FILE"
+    line2="$line2  挂载门禁失败 0"
 fi
+echo "  $line2" | tee -a "$LOG_FILE"
 
-echo "  总用时: $SCRIPT_DURATION" | tee -a "$LOG_FILE"
-
+# 第 3 行：传输统计
 if [ $TOTAL_FILES_SCAN -gt 0 ] || [ $TOTAL_BYTES_SENT -gt 0 ]; then
-    echo "  传输统计:" | tee -a "$LOG_FILE"
-    echo "    文件:   $TOTAL_FILES_XFER / $TOTAL_FILES_SCAN" | tee -a "$LOG_FILE"
-    echo "    总大小: $(format_bytes $TOTAL_BYTES_TOTAL)" | tee -a "$LOG_FILE"
-    echo "    数据:   发送 $(format_bytes $TOTAL_BYTES_SENT) + 接收 $(format_bytes $TOTAL_BYTES_RECV)" | tee -a "$LOG_FILE"
-    if [ $TOTAL_RSYNC_MS -gt 0 ]; then
-        echo "    速率:   平均 $(format_rate $((TOTAL_BYTES_SENT + TOTAL_BYTES_RECV)) "$TOTAL_RSYNC_MS")" | tee -a "$LOG_FILE"
-    fi
-    if [ $TOTAL_LIST_MS -gt 0 ]; then
-        echo "    列表:   累计生成耗时 $(format_duration $((TOTAL_LIST_MS / 1000)))" | tee -a "$LOG_FILE"
-    fi
+    rate_str="$(format_rate $((TOTAL_BYTES_SENT + TOTAL_BYTES_RECV)) "$TOTAL_RSYNC_MS")"
+    list_str="$(format_duration $((TOTAL_LIST_MS / 1000)))"
+    rsync_str="$(format_duration $((TOTAL_RSYNC_MS / 1000)))"
+    echo "  传输: 文件: $TOTAL_FILES_XFER/$TOTAL_FILES_SCAN  总大小: $(format_bytes $TOTAL_BYTES_TOTAL)  数据: 发送 $(format_bytes $TOTAL_BYTES_SENT) + 接收 $(format_bytes $TOTAL_BYTES_RECV)  速率: $rate_str  列表: $list_str  执行: $rsync_str" | tee -a "$LOG_FILE"
 fi
 
-# 追加 summary 到统计文件（英文展示字段）
+echo "$SEP80" | tee -a "$LOG_FILE"
+
+# 追加 summary 到统计文件
 {
     echo "[summary]"
     echo "tasks=success ${#success_tasks[@]} / skipped ${#skipped_tasks[@]} / failed ${#failed_tasks[@]} / mount_failed ${#mount_failed_tasks[@]}"
