@@ -252,7 +252,8 @@ func findScriptPath() string {
 	}
 	home, _ := os.UserHomeDir()
 	candidates := []string{
-		filepath.Join(home, "rbackup", "rbackup.sh"),
+		filepath.Join(home, "rbackup-tui", "rbackup.sh"),
+		filepath.Join(home, "rbackup", "rbackup.sh"), // 旧布局，保持兼容
 		filepath.Join(home, ".local", "bin", "rbackup"),
 		filepath.Join(home, ".local", "bin", "rbackup.sh"),
 	}
@@ -275,7 +276,15 @@ func findConfigPath() string {
 		return p
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "rbackup", "config.ini")
+	newPath := filepath.Join(home, "rbackup-tui", "config.ini")
+	oldPath := filepath.Join(home, "rbackup", "config.ini")
+	if _, err := os.Stat(newPath); err == nil {
+		return newPath
+	}
+	if _, err := os.Stat(oldPath); err == nil {
+		return oldPath // 旧布局，保持兼容
+	}
+	return newPath
 }
 
 func NewApp() *App {
@@ -2097,6 +2106,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "查找过的位置：")
 		fmt.Fprintln(os.Stderr, "  <二进制同目录>/rbackup.sh")
+		fmt.Fprintln(os.Stderr, "  $HOME/rbackup-tui/rbackup.sh")
 		fmt.Fprintln(os.Stderr, "  $HOME/rbackup/rbackup.sh")
 		fmt.Fprintln(os.Stderr, "  $HOME/.local/bin/rbackup")
 		fmt.Fprintln(os.Stderr, "  $HOME/.local/bin/rbackup.sh")

@@ -1,0 +1,108 @@
+name: Release
+
+# 推送 tag 即自动构建三平台产物、生成校验和，并创建 GitHub Release。
+# 本地 `make release` 只做本地打包，不再上传，避免两边抢建同一个 Release。
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '已存在的 tag（例如 v1.1.6）'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: 构建与打包
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出（必须含 tag history）
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 版本一致性校验（tag 与 git describe 必须一致）
+        run: make check-version EXPECT_TAG="$TAG"
+
+      - name: 构建三平台并打包
+        run: make package
+
+      - name: 生成 SHA256SUMS 与 install.sh
+        run: make stage-release-extras checksums
+
+      - name: 冒烟测试（linux/amd64 产物）
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/smoke
+          tar xzf dist/rbackup-tui-"$TAG"-linux-amd64.tar.gz -C /tmp/smoke
+          dir="$(find /tmp/smoke -maxdepth 1 -type d -name 'rbackup-tui-*' | head -n1)"
+          test -x "$dir/rbackup-tui"
+          test -x "$dir/rbackup.sh"
+          test -f "$dir/config1.ini.example"
+          echo "冒烟测试通过：$dir"
+
+      - name: 校验和复核
+        run: cd dist && sha256sum -c SHA256SUMS
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: 发布 Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: 产物清单
+        run: ls -lh dist/
+
+      - name: 校验和复核
+        run: cd dist && sha256sum -c SHA256SUMS
+
+      - name: 创建或更新 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo ">>> Release $TAG 已存在，覆盖附件"
+            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            echo ">>> 创建 Release $TAG"
+            gh release create "$TAG" dist/* \
+              --title "$TAG" \
+              --generate-notes \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+
+      - name: 发布结果
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,assets \
+             --jq '"\(.url)\n" + (.assets[] | "  \(.name)  \(.size) bytes")'

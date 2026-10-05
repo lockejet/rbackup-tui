@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go-build:
+    name: Go 构建（三平台）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet .
+
+      - name: 构建当前平台
+        run: go build -ldflags "-X main.Version=ci" -o /tmp/rbackup-tui .
+
+      - name: 三平台交叉编译
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rb-ci
+          for target in linux/amd64 linux/arm64 windows/amd64; do
+            os="${target%/*}"; arch="${target#*/}"
+            out="/tmp/rb-ci/rbackup-tui-${os}-${arch}"
+            [ "$os" = "windows" ] && out="${out}.exe"
+            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -ldflags "-X main.Version=ci" -o "$out" .
+            echo "✓ $out"
+          done
+
+      - name: gofmt 提示（不阻塞）
+        continue-on-error: true
+        run: |
+          mapfile -t files < <(gofmt -l main.go config.go runner.go)
+          if [ "${#files[@]}" -gt 0 ]; then
+            echo "::warning::以下文件未通过 gofmt: ${files[*]}"
+            gofmt -d "${files[@]}" | head -60
+          fi
+
+  shell-and-scripts:
+    name: Shell 脚本与集成自测
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+
+      - name: 语法检查（bash -n）
+        run: |
+          set -euo pipefail
+          for f in rbackup.sh install.sh \
+                   integrations/lazyrsync/rbackup-gate.sh \
+                   integrations/lazyrsync/test-gate.sh; do
+            bash -n "$f"
+            echo "✓ bash -n $f"
+          done
+
+      - name: shellcheck 新增脚本（阻塞）
+        run: shellcheck --severity=error install.sh integrations/lazyrsync/rbackup-gate.sh
+
+      - name: shellcheck 存量脚本（仅提示）
+        continue-on-error: true
+        run: shellcheck rbackup.sh
+
+      - name: 安装器行为自测
+        run: |
+          set -euo pipefail
+          HOME="$(mktemp -d)" ./install.sh --help >/dev/null
+          echo "✓ --help 可用"
+
+          # 未知参数必须被拒绝
+          if HOME="$(mktemp -d)" ./install.sh --bogus >/dev/null 2>&1; then
+            echo "✗ 未知参数未被拒绝"; exit 1
+          fi
+          echo "✓ 未知参数被拒绝"
+
+          # 未安装过就卸载，必须给出明确错误
+          if HOME="$(mktemp -d)" ./install.sh --uninstall >/dev/null 2>&1; then
+            echo "✗ 无清单时卸载未报错"; exit 1
+          fi
+          echo "✓ 无清单时卸载正确报错"
+
+          # 不存在的版本必须下载失败而非"安装成功"
+          if HOME="$(mktemp -d)" ./install.sh --version v0.0.0-nonexistent >/dev/null 2>&1; then
+            echo "✗ 不存在的版本竟然安装成功"; exit 1
+          fi
+          echo "✓ 不存在的版本被正确拒绝"
+
+      - name: 挂载门禁集成自测
+        run: bash integrations/lazyrsync/test-gate.sh

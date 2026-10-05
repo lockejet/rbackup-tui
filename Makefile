@@ -42,13 +42,22 @@ TARGET := $(BUILD_DIR)/$(GOOS)/$(BIN)$(SUFFIX)
 REPO ?= $(shell git remote get-url origin 2>/dev/null | head -n1 | \
            sed -E 's|^[^:]+://[^/]+/||; s|^git@[^:]+:||; s|\.git$$||')
 NOTES ?= $(DIST_DIR)/RELEASE_NOTES.md
+RELEASE_BASE ?= https://github.com/$(REPO)/releases/download/$(VERSION)
+
+# ---------- 安装参数 ----------
+SYSTEM     ?= 0                          # SYSTEM=1 → 系统级
+SUDO       ?=                            # 系统级安装时置为 sudo
+FROM       ?=                            # 离线安装用的本地预编译包
+EXPECT_TAG ?=                            # CI: 期望的 tag
+# clone 模式下默认安装与当前检出匹配的版本；无 tag 时退化为 latest
+PREBUILT_VERSION ?= $(if $(filter dev,$(VERSION)),latest,$(VERSION))
 
 # ============================================================
 # 构建
 # ============================================================
 
 .PHONY: build
-build:
+build: require-go
 	@mkdir -p $(BUILD_DIR)/$(GOOS)
 	go build -ldflags "$(LDFLAGS)" -o $(TARGET) .
 	@echo ">>> $(TARGET)"
@@ -127,6 +136,27 @@ package-win: build-win
 
 .PHONY: release-check
 release-check:
+	@test "$(VERSION)" != "dev" || { \
+		echo "错误: 无法从 git 解析版本（浅克隆缺少 tag？）"; \
+		echo "提示: git fetch --tags"; \
+		exit 1; \
+	}
+	@git rev-parse "$(VERSION)" >/dev/null 2>&1 || { \
+		echo "错误: tag '$(VERSION)' 不存在"; \
+		echo "先打 tag: git tag -a $(VERSION) -m '...'"; \
+		echo "然后推送: git push origin $(VERSION)"; \
+		exit 1; \
+	}
+	@[ -n "$(REPO)" ] || { \
+		echo "错误: 无法从 git remote 解析仓库"; \
+		echo "请检查: git remote -v"; \
+		exit 1; \
+	}
+	@echo ">>> 仓库: $(REPO)"
+	@echo ">>> 版本: $(VERSION)"
+
+.PHONY: release-upload-check
+release-upload-check:
 	@command -v gh >/dev/null 2>&1 || { \
 		echo "错误: 未安装 gh CLI"; \
 		echo "安装: https://cli.github.com/"; \
@@ -137,19 +167,7 @@ release-check:
 		echo "运行: gh auth login"; \
 		exit 1; \
 	}
-	@[ -n "$(REPO)" ] || { \
-		echo "错误: 无法从 git remote 解析仓库"; \
-		echo "请检查: git remote -v"; \
-		exit 1; \
-	}
-	@git rev-parse "$(VERSION)" >/dev/null 2>&1 || { \
-		echo "错误: tag '$(VERSION)' 不存在"; \
-		echo "先打 tag: git tag -a $(VERSION) -m '...'"; \
-		echo "然后推送: git push origin $(VERSION)"; \
-		exit 1; \
-	}
-	@echo ">>> 仓库: $(REPO)"
-	@echo ">>> 版本: $(VERSION)"
+	@echo ">>> gh 就绪"
 
 .PHONY: release-notes
 release-notes:
@@ -177,16 +195,77 @@ release-notes:
 	@echo "--- 结束 ---"
 	@echo ""
 
+# 把安装器与校验和纳入发布资产
+.PHONY: stage-release-extras
+stage-release-extras:
+	@mkdir -p $(DIST_DIR)
+	@install -m 0755 install.sh $(DIST_DIR)/install.sh
+	@echo ">>> $(DIST_DIR)/install.sh"
+
+.PHONY: checksums
+checksums:
+	@cd $(DIST_DIR) && rm -f SHA256SUMS && \
+	  for f in *.tar.gz *.zip install.sh; do \
+	    [ -e "$$f" ] || continue; \
+	    sha256sum "$$f" >> SHA256SUMS; \
+	  done
+	@echo ">>> $(DIST_DIR)/SHA256SUMS"
+	@cat $(DIST_DIR)/SHA256SUMS
+
+# CI 用：确保版本解析正确（浅克隆缺 tag 时 PKG_VERSION 会退化成 dev）
+.PHONY: check-version
+check-version:
+	@test "$(VERSION)" != "dev" || { \
+		echo "错误: 版本解析为 dev —— 通常是浅克隆缺少 tag"; \
+		echo "修复: actions/checkout 需 fetch-depth: 0"; \
+		exit 1; \
+	}
+	@if [ -n "$(EXPECT_TAG)" ]; then \
+		test "$(VERSION)" = "$(EXPECT_TAG)" || { \
+			echo "错误: tag '$(EXPECT_TAG)' 与解析出的 '$(VERSION)' 不一致"; \
+			exit 1; \
+		}; \
+	fi
+	@echo ">>> 版本校验通过: $(VERSION)"
+
+# 校验已发布资产：下载 + 比对 SHA256SUMS
+.PHONY: verify-release
+verify-release:
+	@test "$(VERSION)" != "dev" || { echo "用法: make verify-release VERSION=v1.1.6"; exit 1; }
+	@tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	  echo ">>> 从 $(RELEASE_BASE) 下载校验"; \
+	  for f in $(PKG_NAME)-linux-amd64.tar.gz $(PKG_NAME)-linux-arm64.tar.gz \
+	           $(PKG_NAME)-windows-amd64.zip SHA256SUMS install.sh; do \
+	    curl -fsSL -o "$$tmp/$$f" "$(RELEASE_BASE)/$$f" \
+	      || { echo "✗ 下载失败: $$f"; exit 1; }; \
+	    echo "  ✓ $$f"; \
+	  done; \
+	  cd "$$tmp" && sha256sum -c SHA256SUMS && \
+	  bash -n install.sh && echo ">>> install.sh 语法 OK" && \
+	  echo ">>> 全部校验通过"
+
 .PHONY: release
-release: release-check package release-notes
+release: release-check package stage-release-extras checksums release-notes
 	@echo ""
-	@echo ">>> 创建 GitHub Release: $(VERSION)"
+	@echo ">>> 本地发布包已就绪（未上传任何东西）"
+	@ls -lh $(DIST_DIR)/
+	@echo ""
+	@echo ">>> 正式发布由 GitHub Actions 完成：推送 tag 即可"
+	@echo "    git tag -a $(VERSION) -m '$(VERSION)'    # 若尚未打 tag"
+	@echo "    git push origin $(VERSION)"
+	@echo ""
+	@echo ">>> 应急手工上传: make release-upload"
+
+.PHONY: release-upload
+release-upload: release-check release-upload-check package stage-release-extras checksums
+	@echo ">>> 上传附件到 Release: $(VERSION)"
 	@if gh release view "$(VERSION)" --repo "$(REPO)" >/dev/null 2>&1; then \
-		echo ">>> Release $(VERSION) 已存在，只上传附件（--clobber 覆盖同名）"; \
 		gh release upload "$(VERSION)" \
 		    $(DIST_DIR)/$(PKG_NAME)-linux-amd64.tar.gz \
 		    $(DIST_DIR)/$(PKG_NAME)-linux-arm64.tar.gz \
 		    $(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip \
+		    $(DIST_DIR)/install.sh \
+		    $(DIST_DIR)/SHA256SUMS \
 		    --clobber \
 		    --repo "$(REPO)"; \
 	else \
@@ -194,23 +273,12 @@ release: release-check package release-notes
 		    $(DIST_DIR)/$(PKG_NAME)-linux-amd64.tar.gz \
 		    $(DIST_DIR)/$(PKG_NAME)-linux-arm64.tar.gz \
 		    $(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip \
+		    $(DIST_DIR)/install.sh \
+		    $(DIST_DIR)/SHA256SUMS \
 		    --title "$(VERSION)" \
 		    --notes-file "$(NOTES)" \
 		    --repo "$(REPO)"; \
 	fi
-	@echo ""
-	@echo ">>> 发布完成"
-	@echo ">>> URL: $$(gh release view $(VERSION) --repo $(REPO) --json url --jq '.url')"
-
-.PHONY: release-upload
-release-upload: release-check package
-	@echo ">>> 上传附件到 Release: $(VERSION)"
-	@gh release upload "$(VERSION)" \
-	    $(DIST_DIR)/$(PKG_NAME)-linux-amd64.tar.gz \
-	    $(DIST_DIR)/$(PKG_NAME)-linux-arm64.tar.gz \
-	    $(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip \
-	    --clobber \
-	    --repo "$(REPO)"
 	@echo ">>> 上传完成"
 
 .PHONY: release-delete
@@ -224,24 +292,84 @@ release-delete:
 
 # ============================================================
 # 安装 / 卸载
+#
+#   手动模式（源码 + Go）    make install / make install-system
+#   克隆模式（不需要 Go）    make install-prebuilt [SYSTEM=1] [VERSION=v1.1.5] [FROM=dist/xxx.tar.gz]
+#   懒人模式（无源码无 Go）  curl 发行版里的 install.sh，或 make install-lazy
 # ============================================================
 
-.PHONY: install
-install: build
-	@echo ">>> 安装 $(BIN) 到 $(DESTDIR)$(BINDIR)/"
-	install -d "$(DESTDIR)$(BINDIR)"
-	install -m 0755 "$(TARGET)" "$(DESTDIR)$(BINDIR)/$(BIN)$(SUFFIX)"
+.PHONY: require-go
+require-go:
+	@command -v go >/dev/null 2>&1 || { \
+		echo "错误: 未安装 Go"; \
+		echo ""; \
+		echo "手动模式需要源码 + Go。不想装 Go 请改用:"; \
+		echo "  make install-prebuilt     # 从 GitHub Release 装预编译包"; \
+		exit 1; \
+	}
+
+.PHONY: install-files
+install-files:
+	$(SUDO) install -d "$(DESTDIR)$(BINDIR)"
+	$(SUDO) install -m 0755 "$(TARGET)" "$(DESTDIR)$(BINDIR)/$(BIN)$(SUFFIX)"
 	@if [ -f "$(SCRIPT_FILE)" ]; then \
-		install -m 0755 "$(SCRIPT_FILE)" "$(DESTDIR)$(BINDIR)/$(SCRIPT_FILE)"; \
+		$(SUDO) install -m 0755 "$(SCRIPT_FILE)" "$(DESTDIR)$(BINDIR)/$(SCRIPT_FILE)"; \
 	fi
-	@echo ">>> 安装完成"
+
+# ---------- 手动模式：源码 + Go ----------
+.PHONY: install install-user
+install install-user: build install-files
+	@echo ">>> 安装完成（用户级）: $(DESTDIR)$(BINDIR)/$(BIN)$(SUFFIX)"
+	@echo ">>> 配置目录: $(HOME)/rbackup-tui/"
+
+.PHONY: install-system
+install-system: build
+	@echo ">>> 系统级安装到 /usr/local/bin（需要 sudo 权限）"
+	@$(MAKE) --no-print-directory install-files SUDO=sudo BINDIR=/usr/local/bin
+	@echo ">>> 安装完成（系统级）"
+	@echo ">>> 配置仍按每个用户: ~/rbackup-tui/config.ini"
+
+# ---------- 克隆模式：下载预编译包，全程不调用 go ----------
+.PHONY: install-prebuilt
+install-prebuilt:
+	@bash ./install.sh \
+	    $(if $(filter 1,$(SYSTEM)),--system,) \
+	    --version $(PREBUILT_VERSION) \
+	    $(if $(FROM),--from "$(FROM)",)
+
+# ---------- 懒人模式：连源码都不要（自举 Release 里的 install.sh）----------
+.PHONY: install-lazy
+install-lazy:
+	@url="https://github.com/$(REPO)/releases/latest/download/install.sh"; \
+	echo ">>> 从 Release 获取安装器: $$url"; \
+	tmp=$$(mktemp); \
+	if [ -n "$${GH_TOKEN:-}" ]; then \
+	    curl -fsSL -H "Authorization: Bearer $$GH_TOKEN" "$$url" -o "$$tmp" \
+	      || { echo "✗ 下载失败：install.sh 走的是公开下载地址，私有仓库请改用 make install-prebuilt" >&2; rm -f "$$tmp"; exit 1; }; \
+	else \
+	    curl -fsSL "$$url" -o "$$tmp" \
+	      || { echo "✗ 下载失败：仓库可能尚未公开，或该 Release 还没有 install.sh 资产" >&2; rm -f "$$tmp"; exit 1; }; \
+	fi; \
+	bash "$$tmp" $(if $(filter 1,$(SYSTEM)),--system,); rc=$$?; rm -f "$$tmp"; exit $$rc
 
 .PHONY: uninstall
 uninstall:
-	-rm -f "$(DESTDIR)$(BINDIR)/$(BIN)$(SUFFIX)"
-	-rm -f "$(DESTDIR)$(BINDIR)/$(BIN)"
-	-rm -f "$(DESTDIR)$(BINDIR)/$(SCRIPT_FILE)"
-	@echo ">>> 卸载完成（未删除配置目录）"
+	@if [ -f "$(HOME)/rbackup-tui/install-manifest.txt" ]; then \
+		echo ">>> 按安装清单卸载（保留配置与日志）"; \
+		if [ -f ./install.sh ]; then \
+			bash ./install.sh --uninstall; \
+		else \
+			echo "错误: 当前目录没有 install.sh"; \
+			echo "请运行: curl -fsSL https://github.com/$(REPO)/releases/latest/download/install.sh | bash -s -- --uninstall"; \
+			exit 1; \
+		fi; \
+	else \
+		echo ">>> 卸载手动安装的文件（保留配置目录）"; \
+		rm -f "$(DESTDIR)$(BINDIR)/$(BIN)$(SUFFIX)" \
+		      "$(DESTDIR)$(BINDIR)/$(BIN)" \
+		      "$(DESTDIR)$(BINDIR)/$(SCRIPT_FILE)"; \
+		echo ">>> 完成"; \
+	fi
 
 # ============================================================
 # 其他
@@ -266,7 +394,23 @@ version:
 
 .PHONY: help
 help:
-	@echo "rbackup-tui 构建与发布"
+	@echo "rbackup-tui 构建、打包、安装"
+	@echo ""
+	@echo "安装 —— 三种模式:"
+	@echo "  [懒人模式] 无源码、无 Go："
+	@echo "      curl -fsSL https://github.com/$(REPO)/releases/latest/download/install.sh | bash"
+	@echo "      curl -fsSL .../install.sh | sudo bash -s -- --system"
+	@echo "      make install-lazy [SYSTEM=1]           # 同上的 Makefile 包装"
+	@echo "  [克隆模式] git clone 后，不需要 Go："
+	@echo "      make install-prebuilt                  # 装当前检出对应的版本"
+	@echo "      make install-prebuilt SYSTEM=1         # 系统级"
+	@echo "      make install-prebuilt VERSION=v1.1.5   # 指定版本"
+	@echo "      make install-prebuilt FROM=dist/x.tar.gz   # 离线"
+	@echo "  [手动模式] 源码 + Go："
+	@echo "      make install                           # 用户级 ($(PREFIX))"
+	@echo "      make install-system                    # /usr/local（sudo）"
+	@echo ""
+	@echo "  卸载: make uninstall"
 	@echo ""
 	@echo "构建:"
 	@echo "  make build               编当前平台"
@@ -276,27 +420,27 @@ help:
 	@echo "  make build-all           全部"
 	@echo ""
 	@echo "打包:"
-	@echo "  make package             全部平台（生成 dist/*.tar.gz / *.zip）"
+	@echo "  make package             全部平台（dist/*.tar.gz / *.zip）"
 	@echo "  make package-linux       仅 Linux amd64"
 	@echo "  make package-linux-arm64 仅 Linux arm64"
 	@echo "  make package-win         仅 Windows amd64"
+	@echo "  make checksums           生成 dist/SHA256SUMS"
 	@echo ""
-	@echo "发布（GitHub Release）:"
-	@echo "  make release             打包 + 创建 Release + 上传附件"
-	@echo "  make release-upload      只上传附件"
-	@echo "  make release-notes       只生成 notes 文件"
+	@echo "发布:"
+	@echo "  make release             本地打包 + 校验和（不上传）"
+	@echo "  make release-notes       生成发布说明"
+	@echo "  make verify-release VERSION=v1.1.6   校验已发布资产"
+	@echo "  make release-upload      应急手工上传（需要 gh）"
 	@echo "  make release-delete      删除 Release（保留 tag）"
-	@echo ""
-	@echo "安装:"
-	@echo "  make install             装到 $(PREFIX)"
-	@echo "  make uninstall           卸载"
 	@echo ""
 	@echo "其他:"
 	@echo "  make clean               清空 bin/ dist/ .staging/"
 	@echo "  make version             显示版本信息"
+	@echo "  make check-version       校验版本解析（CI 用）"
 	@echo "  make help                本帮助"
 	@echo ""
-	@echo "发布参数:"
-	@echo "  VERSION=v1.1.3           指定版本（默认取 git 最近 tag）"
-	@echo "  NOTES=xxx.md             指定 notes 路径（默认 dist/RELEASE_NOTES.md）"
+	@echo "参数:"
+	@echo "  VERSION=v1.1.5           指定版本（默认取 git 最近 tag）"
+	@echo "  SYSTEM=1                 安装到系统级"
+	@echo "  FROM=dist/x.tar.gz       离线安装用的本地包"
 	@echo "  REPO=user/repo           手动指定仓库（默认从 git remote 解析）"
