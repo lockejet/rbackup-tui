@@ -7,7 +7,7 @@
 HOST=example.com
 SSH_PORT=22
 SSH_USER=admin
-SSH_KEY=/home/admin/.ssh/id_ed25519
+SSH_KEY=~/.ssh/id_ed25519
 
 # 日志目录（自动生成 ${SCRIPT_NAME}_${DATE}.log）
 LOG_DIR=/var/log

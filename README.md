@@ -160,12 +160,74 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 
 ## 安装
 
-### 依赖
+三种方式，按你手上有什么选一种。
 
-- Go 1.21+
-- rbackup.sh（同目录或指定路径）
+### 方式一：懒人模式（不需要源码，不需要 Go）
 
-### 下载发布包
+一条命令，自动识别系统与架构，从 GitHub Releases 下载预编译包并校验 SHA256：
+
+    # 用户级（无需 sudo）
+    curl -fsSL https://github.com/lockejet/rbackup-tui/releases/latest/download/install.sh | bash
+
+    # 系统级（装到 /usr/local/bin，需要 sudo）
+    curl -fsSL https://github.com/lockejet/rbackup-tui/releases/latest/download/install.sh | sudo bash -s -- --system
+
+常用参数：
+
+| 参数 | 说明 |
+|---|---|
+| `--system` | 系统级安装 |
+| `--prefix DIR` | 自定义安装前缀 |
+| `--version v1.1.5` | 指定版本（默认 latest） |
+| `--from FILE` | 用本地预编译包安装（离线） |
+| `--uninstall` | 卸载（保留配置与日志） |
+| `--dry-run` | 只打印将要做什么 |
+| `--require-checksum` | 缺少 SHA256SUMS 时直接失败 |
+
+安装布局：
+
+| | 用户级 | 系统级 |
+|---|---|---|
+| 主程序 | `~/.local/bin/rbackup-tui` | `/usr/local/bin/rbackup-tui` |
+| 后端脚本 | `~/.local/bin/rbackup.sh` | `/usr/local/bin/rbackup.sh` |
+| 配置 / 日志 | `~/rbackup-tui/` | 仍按每个用户 `~/rbackup-tui/` |
+| 样例 / 文档 | `~/rbackup-tui/` | `/usr/local/share/rbackup-tui/` |
+
+Windows（MSYS2 / Git Bash）下用户级安装到 `~/.local/bin`；`--system` 装到
+`%LOCALAPPDATA%/Programs/rbackup-tui`（无需管理员权限）。
+
+### 方式二：git clone 模式（不需要 Go）
+
+    git clone https://github.com/lockejet/rbackup-tui.git
+    cd rbackup-tui
+
+    make install-prebuilt                 # 用户级，装当前检出对应的版本
+    make install-prebuilt SYSTEM=1        # 系统级
+    make install-prebuilt VERSION=v1.1.5  # 指定版本
+    make install-prebuilt FROM=dist/rbackup-tui-v1.1.5-linux-amd64.tar.gz   # 离线
+
+全程只下载预编译包，不会调用 `go`。
+
+### 方式三：手动模式（源码 + Go，自己编译）
+
+依赖：Go 1.27+（见 `go.mod`）
+
+    git clone https://github.com/lockejet/rbackup-tui.git
+    cd rbackup-tui
+
+    make install            # 用户级：编译并装到 ~/.local/bin
+    make install-system     # 系统级：编译后 sudo 装到 /usr/local/bin
+    make build              # 只编译不安装
+    make package            # 打三平台发布包
+
+### 卸载
+
+    make uninstall                                          # 在克隆目录里执行
+    curl -fsSL .../install.sh | bash -s -- --uninstall       # 预编译安装的
+
+只删除程序文件，保留 `~/rbackup-tui/` 下的配置与日志。
+
+### 手动解压（不想用安装器）
 
 从 GitHub Releases 下载对应平台的压缩包，解压后目录结构：
 
@@ -184,31 +246,6 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
     ./rbackup-tui -c config2.ini -s rbackup.sh
 
 `rbackup.sh` 与二进制同目录时，`-s` 可以省略。
-
-### 源码安装
-
-    git clone <repo-url> ~/rbackup-tui
-    cd ~/rbackup-tui
-    make build
-
-### 用户级安装（无需 sudo）
-
-    make install
-
-安装到：
-
-- ~/.local/bin/rbackup-tui
-- ~/.local/bin/rbackup.sh
-
-### 系统级安装
-
-    sudo make install PREFIX=/usr/local
-
-### 卸载
-
-    make uninstall
-
-只删除二进制和脚本，不删除配置文件目录。
 
 ---
 
@@ -386,7 +423,7 @@ rsync 只允许 `--chown` 出现一次。可以放在：
     # 全局 SSH 参数
     HOST=example.com
     SSH_PORT=22
-    SSH_KEY=/home/admin/.ssh/id_ed25519
+    SSH_KEY=~/.ssh/id_ed25519
 
     # 日志目录（自动生成 ${SCRIPT_NAME}_${DATE}.log 与 .stats）
     LOG_DIR=/var/log
@@ -467,14 +504,14 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 
 ### 启动
 
-    # 默认读取 $HOME/rbackup/config.ini
+    # 默认读取 $HOME/rbackup-tui/config.ini
     rbackup-tui
 
     # 指定配置
-    rbackup-tui -c ~/rbackup/config1.ini
+    rbackup-tui -c ~/rbackup-tui/config1.ini
 
     # 指定脚本
-    rbackup-tui -c ~/rbackup/config1.ini -s ~/rbackup/rbackup.sh
+    rbackup-tui -c ~/rbackup-tui/config1.ini -s ~/rbackup-tui/rbackup.sh
 
 ### 命令行参数
 
@@ -487,11 +524,15 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 
 1. 命令行 `-s` 指定
 2. 环境变量 `RBACKUP_SCRIPT`
-3. 二进制同目录（发布包解压场景）
-4. `$HOME/rbackup/rbackup.sh`
-5. `$HOME/.local/bin/rbackup`
-6. `$HOME/.local/bin/rbackup.sh`
-7. `PATH` 中的 `rbackup.sh` / `rbackup`
+3. 二进制同目录（安装器与发布包的场景：`rbackup.sh` 与主程序并排）
+4. `$HOME/rbackup-tui/rbackup.sh`
+5. `$HOME/rbackup/rbackup.sh`（旧布局，保持兼容）
+6. `$HOME/.local/bin/rbackup`
+7. `$HOME/.local/bin/rbackup.sh`
+8. `PATH` 中的 `rbackup.sh` / `rbackup`
+
+配置路径查找顺序：`-c` → `RBACKUP_CONFIG` → `$HOME/rbackup-tui/config.ini`
+→ `$HOME/rbackup/config.ini`（旧布局）。
 
 全找不到时报错退出，提示用 `-s` 或 `RBACKUP_SCRIPT` 指定。
 
@@ -892,46 +933,60 @@ Makefile 会自动注入版本：
 
 ### 发布到 GitHub Release
 
-前提：安装 gh CLI 并登录。
+发布由 GitHub Actions 自动完成：**推送 tag 即触发**。
 
-    gh auth login
-
-流程：
-
-    # 1. 提交代码
+    # 1. 提交并推送代码
     git add -A
     git commit -m "feat: ..."
     git push
 
-    # 2. 手动打 tag
-    git tag -a v1.1.5 -m "v1.1.5: ..."
+    # 2. 打 tag 并推送（用 -a 创建注释 tag）
+    git tag -a v1.1.6 -m "v1.1.6: ..."
+    git push origin v1.1.6
 
-    # 3. 推送 tag
-    git push origin v1.1.5
+    # 3. 观察 workflow
+    gh run watch
 
-    # 4. 打包 + 创建 Release + 上传
+`.github/workflows/release.yml` 会：
+
+1. 校验 tag 与 `git describe` 一致（浅克隆缺 tag 会直接失败）
+2. 编译 linux/amd64、linux/arm64、windows/amd64 三个平台
+3. 打包成压缩包，生成 `SHA256SUMS`
+4. 冒烟测试产物，复核校验和
+5. 创建 Release（已存在则覆盖附件）
+
+附件包含三个压缩包、`SHA256SUMS` 和 `install.sh`。Release 里的 `install.sh`
+就是懒人模式入口，两者永远同版本。
+
+    dist/
+    ├── rbackup-tui-v1.1.6-linux-amd64.tar.gz
+    ├── rbackup-tui-v1.1.6-linux-arm64.tar.gz
+    ├── rbackup-tui-v1.1.6-windows-amd64.zip
+    ├── install.sh
+    ├── SHA256SUMS
+    └── RELEASE_NOTES.md
+
+### 本地打包（不上传）
+
     make release
 
-`make release` 会：
-
-1. 检查 gh 已装、已登录、tag 存在
-2. 编译三个平台
-3. 打包成压缩包
-4. 从 git log 自动生成 `dist/RELEASE_NOTES.md`
-5. 调用 `gh release create` 创建 Release 并上传附件
-
-**不自动 push**：tag 和 main 都需要用户手动 push，避免误操作。
+等价于 `make package stage-release-extras checksums release-notes`：产物落在
+`dist/`，**不会**创建或修改任何 Release，也不需要 gh。用于离线交付、内网分发
+或发布前预演。
 
 ### 其他发布命令
 
-    # 只上传附件（重新编译后覆盖）
-    make release-upload VERSION=v1.1.5
+    # 校验已发布资产（下载 + 比对 SHA256SUMS + bash -n install.sh）
+    make verify-release VERSION=v1.1.6
+
+    # 应急手工上传（Actions 不可用时）
+    make release-upload VERSION=v1.1.6
 
     # 只生成 notes 文件查看
-    make release-notes VERSION=v1.1.5
+    make release-notes VERSION=v1.1.6
 
     # 删除 Release（保留 tag）
-    make release-delete VERSION=v1.1.5
+    make release-delete VERSION=v1.1.6
 
 ### 参数
 
@@ -940,6 +995,7 @@ Makefile 会自动注入版本：
 | VERSION | 版本号，默认取 git 最近 tag |
 | NOTES | notes 文件路径，默认 dist/RELEASE_NOTES.md |
 | REPO | 仓库，默认从 git remote 解析 |
+| EXPECT_TAG | CI 用：要求解析出的版本必须等于该 tag |
 
 ---
 
@@ -1033,6 +1089,7 @@ rbackup.sh 会自动回退到脚本同目录的 log/。
     ├── config.go                配置解析
     ├── runner.go                执行 rbackup.sh
     ├── rbackup.sh               备份核心脚本
+    ├── install.sh               懒人模式安装器（也作为 Release 资产发布）
     ├── go.mod
     ├── go.sum
     ├── Makefile
@@ -1040,6 +1097,9 @@ rbackup.sh 会自动回退到脚本同目录的 log/。
     ├── LICENSE
     ├── config1.ini.example      示例一：明文源 → 明文挂载点
     ├── config2.ini.example      示例二：密文源 → 密文目录
+    ├── .github/workflows/       release.yml（tag 自动发布）、ci.yml
+    ├── docs/                    文档（含 CLEAN-HISTORY.md 运维操作单）
+    ├── integrations/lazyrsync/  lazyrsync 挂载门禁集成（可选，不打包）
     ├── bin/                     编译产物（不入库）
     ├── dist/                    发布包（不入库）
     └── .staging/                打包临时目录（不入库）
