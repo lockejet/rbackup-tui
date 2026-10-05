@@ -26,13 +26,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 检出（必须含 tag history）
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
 
       - name: 安装 Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -104,5 +104,9 @@ jobs:
       - name: 发布结果
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,assets \
-             --jq '"\(.url)\n" + (.assets[] | "  \(.name)  \(.size) bytes")'
+        run: |
+          set -euo pipefail
+          echo ">>> Release 页面: $(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url --jq .url)"
+          echo ">>> 资产清单:"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[] | "    \(.name)  \(.size) bytes"'
