@@ -168,9 +168,10 @@ func (t *Task) NeedsMountCheck(policy string) bool {
 }
 
 // MountGateMode 返回门禁模式
-//   ""                 不检查
-//   "require_mounted"   要求已挂载
-//   "require_unmounted" 要求未挂载
+//
+//	""                 不检查
+//	"require_mounted"   要求已挂载
+//	"require_unmounted" 要求未挂载
 func (t *Task) MountGateMode() string {
 	if t.RequireMounted == "yes" {
 		return "require_mounted"

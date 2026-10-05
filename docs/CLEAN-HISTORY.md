@@ -19,9 +19,23 @@
 
 ---
 
-## 第 0 步：先提交手上的改动
+## 第 0 步：先把敏感文件复制出去，再提交
 
-`filter-repo` 会重写 refs 并重置工作区，未提交的改动会丢。先确认干净：
+> **这一步不能省。** `filter-repo` 会把工作区重置到重写后的树：**被它从历史里移除的
+> 文件，如果当时是被 git 跟踪的，就会从磁盘上一起消失**（未跟踪/被忽略的文件不受影响）。
+> 2026-10-05 首次执行时就因此丢过 `config-lnas.ini` 与 `config-office.ini`，
+> 后来靠镜像备份恢复（见文末「恢复」一节）。
+
+```bash
+# ① 把被跟踪的敏感文件另存一份（放仓库外）
+mkdir -p ~/rbackup-secrets-backup
+cp -a config-lnas.ini config-office.ini ~/rbackup-secrets-backup/ 2>/dev/null || true
+
+# ② 确认哪些"会被删"的文件当前是跟踪状态
+git ls-files | grep -E 'config-lnas|config-office' || echo "(无)"
+```
+
+`filter-repo` 会重写 refs 并重置工作区，未提交的改动也会丢。先确认干净：
 
 ```bash
 cd ~/rbackup-tui
@@ -178,14 +192,51 @@ git push --mirror git@github.com:lockejet/rbackup-tui.git
 gh repo edit lockejet/rbackup-tui --visibility private --accept-visibility-change-consequences
 ```
 
+## 恢复被删的工作区文件
+
+前提：第 1 步的镜像备份还在（`~/rbackup-tui-backup-YYYY-MM-DD.git`）。
+
+**关键坑：这两个文件受 git-crypt 加密**（`.gitattributes` 里
+`config-lnas.ini filter=git-crypt diff=git-crypt`），所以 `git show` 取出的是**密文**
+（文件头 `\0GITCRYPT\0`），必须过 smudge 才能得到明文：
+
+```bash
+BK=~/rbackup-tui-backup-2026-10-05.git
+
+# 取密文并解密（密钥在 .git/git-crypt/keys/default，或 ~/rbackup-git-crypt.key）
+git --git-dir="$BK" show HEAD:config-lnas.ini   | git-crypt smudge > config-lnas.ini
+git --git-dir="$BK" show HEAD:config-office.ini | git-crypt smudge > config-office.ini
+
+# 校验确实是明文
+head -c 10 config-lnas.ini | xxd        # 不应出现 GITCRYPT
+grep -n '^HOST' config-lnas.ini
+```
+
+注意镜像里是**最后一次提交**的版本；如果清史前还有未提交的工作区改动，需要手工补回。
+
+### 如何验证恢复是否字节精确
+
+git-crypt 的密文长度 = 明文长度 + 22（严格常量，可用 `/dev/zero` 造样本实测），
+而 git 记录了清史前那份文件的密文长度（`git diff --stat` 里的 `Bin N -> M`）。
+两者对上即为字节精确：
+
+```bash
+# 与 git 当时记录的工作区密文长度比对
+git-crypt clean < config-lnas.ini | wc -c      # 2026-10-05 实测 2400，与记录一致
+git-crypt clean < config-office.ini | wc -c    # 1897，与其 blob 大小一致
+```
+
+补齐未提交改动后再做这一步检查；长度不一致说明有内容差异，需人工核对。
+
 ## 影响与代价
 
 1. **所有已 clone 的副本作废**：历史被重写，旧副本无法再直接 push/pull，必须重新 clone。
    仓库是私有的，受众应只有你本人。
 2. **tag SHA 全部变化**：本地旧 clone 里的 tag 与远端不再一致，需要
    `git fetch --force --tags` 或重新 clone。
-3. **本地文件不受影响**：`config-lnas.ini`、`config-office.ini`、
-   `rbackup.d/`、`log/` 都只是从 git 里移除，磁盘上的文件原样保留
-   （`filter-repo` 之后它们会变成未跟踪状态，`.gitignore` 已覆盖，不会再次被误提交）。
+3. **被跟踪的敏感文件会从磁盘消失**：`config-lnas.ini`、`config-office.ini` 当时是被
+   git 跟踪的，`filter-repo` 重写工作区时把它们删掉了。未跟踪/被忽略的文件
+   （`rbackup.d/`、`log/`、`bin/`、`dist/`、`backup/`、`key.log`）不受影响。
+   恢复方法见下节。
 4. **`GH_TOKEN` 路径仍保留**：`install.sh` 同时支持公开匿名下载与私有 token 下载，
    公开后无需改动任何脚本。

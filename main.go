@@ -1962,7 +1962,6 @@ func (a *App) helpContent() string {
 	b.WriteString(kv("Ctrl+D ×3", "强制退出程序"))
 	b.WriteString("\n")
 
-
 	b.WriteString("[yellow::b]─── 焦点 1: 信息区 (header) ────────────────────────[-:-:-]\n")
 	b.WriteString(kv("← → / h l", "横向滚动"))
 	b.WriteString(kv("↑ ↓ / j k", "纵向滚动（保留）"))

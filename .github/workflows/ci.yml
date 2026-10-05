@@ -14,9 +14,9 @@ jobs:
     name: Go 构建（三平台）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -52,7 +52,7 @@ jobs:
     name: Shell 脚本与集成自测
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 安装 shellcheck
         run: |
@@ -73,8 +73,10 @@ jobs:
         run: shellcheck --severity=error install.sh integrations/lazyrsync/rbackup-gate.sh
 
       - name: shellcheck 存量脚本（仅提示）
-        continue-on-error: true
-        run: shellcheck rbackup.sh
+        run: |
+          if ! shellcheck rbackup.sh; then
+            echo "::warning::rbackup.sh 存在 shellcheck 提示（不阻塞构建）"
+          fi
 
       - name: 安装器行为自测
         run: |
