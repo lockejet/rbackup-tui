@@ -106,10 +106,16 @@ git tag -l
 
 ## 第 4 步：强制推送
 
+> **顺序很重要：先推分支，再推 tag。** 若 tag 事件先送达，此时默认分支上还没有
+> `.github/workflows/release.yml`，GitHub 不会为这次 tag 推送创建 workflow 运行
+> （2026-10-05 首次执行时就是这样：CI 在 main 上跑了，Release 完全没触发）。
+> 补推的办法是删掉 tag 再推一次：
+> `git push origin :refs/tags/vX.Y.Z && git push origin refs/tags/vX.Y.Z`
+
 ```bash
 git remote add origin git@github.com:lockejet/rbackup-tui.git
-git push --force --all
-git push --force --tags
+git push --force --all     # 先分支
+git push --force --tags    # 再 tag（触发 Release workflow）
 ```
 
 推送后逐个确认 7 个 Release 仍正常（附件的存储独立于 git 历史，通常不受影响，
@@ -135,10 +141,11 @@ gh release create v1.1.5 dist/rbackup-tui-v1.1.5-*.tar.gz dist/rbackup-tui-v1.1.
 ## 第 5 步：改为 public
 
 ```bash
-gh repo edit lockejet/rbackup-tui \
-    --visibility public \
-    --accept-visibility-change-consequences
+gh repo edit lockejet/rbackup-tui --visibility public
 ```
+
+> 部分 gh 版本没有 `--accept-visibility-change-consequences` 这个参数（会报
+> `unknown flag`），直接用上面的形式即可，命令成功即代表已确认。
 
 **注意**：GitHub 在公开后会被爬虫与第三方归档立即抓取，这一步没有"反悔窗口"，
 所以必须在第 3 步校验全绿之后再做。
@@ -176,6 +183,22 @@ gh release view v1.1.6 --repo lockejet/rbackup-tui
 ```
 
 ---
+
+## 旧对象残留（2026-10-05 在 public 仓库实测）
+
+强制推送**不等于**删除。重写后按旧 SHA 匿名探测的结果：
+
+| 探测目标 | 结果 |
+|---|---|
+| `rbackup.d/config.ini`（明文，含内网 IP） | **404**，已取不到 |
+| `rbackup.d/log/*.log`（真实备份日志） | **404**，已取不到 |
+| `config-lnas.ini` / `config-office.ini` | **200**，仍可取，但内容是 **git-crypt 密文**（密钥从未入库） |
+| `rbackup.sh` / `main.go` / `README.md`（新历史里仍存在的文件） | 200（与新历史共享同一 blob） |
+| 旧提交对象 `/commits/<old-sha>`、UI `tree/<old-sha>` | 200，按 SHA 仍可浏览 |
+
+结论：真正敏感的**明文**文件已不可取；残留的是密文与无害源码。旧 SHA 从未公开
+（私库、无 fork），可发现性极低。若要彻底清除，需向 GitHub Support 提交
+「清除不可达对象」请求——`push --force` 本身不构成删除保证。
 
 ## 回滚
 
