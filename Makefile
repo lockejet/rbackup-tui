@@ -101,6 +101,8 @@ package-linux: build-linux
 	@cp $(SCRIPT_FILE) $(STAGE_DIR)/$(BIN)-linux-amd64/
 	@cp $(CONFIG_FILES) $(STAGE_DIR)/$(BIN)-linux-amd64/
 	@cp $(DOC_FILES) $(STAGE_DIR)/$(BIN)-linux-amd64/
+	@mkdir -p $(STAGE_DIR)/$(BIN)-linux-amd64/docs/images
+	@cp docs/images/ui-overview.svg $(STAGE_DIR)/$(BIN)-linux-amd64/docs/images/
 	@chmod +x $(STAGE_DIR)/$(BIN)-linux-amd64/$(BIN)
 	@chmod +x $(STAGE_DIR)/$(BIN)-linux-amd64/$(SCRIPT_FILE)
 	@tar czf $(DIST_DIR)/$(PKG_NAME)-linux-amd64.tar.gz -C $(STAGE_DIR) $(BIN)-linux-amd64
@@ -114,6 +116,8 @@ package-linux-arm64: build-linux-arm64
 	@cp $(SCRIPT_FILE) $(STAGE_DIR)/$(BIN)-linux-arm64/
 	@cp $(CONFIG_FILES) $(STAGE_DIR)/$(BIN)-linux-arm64/
 	@cp $(DOC_FILES) $(STAGE_DIR)/$(BIN)-linux-arm64/
+	@mkdir -p $(STAGE_DIR)/$(BIN)-linux-arm64/docs/images
+	@cp docs/images/ui-overview.svg $(STAGE_DIR)/$(BIN)-linux-arm64/docs/images/
 	@chmod +x $(STAGE_DIR)/$(BIN)-linux-arm64/$(BIN)
 	@chmod +x $(STAGE_DIR)/$(BIN)-linux-arm64/$(SCRIPT_FILE)
 	@tar czf $(DIST_DIR)/$(PKG_NAME)-linux-arm64.tar.gz -C $(STAGE_DIR) $(BIN)-linux-arm64
@@ -127,6 +131,8 @@ package-win: build-win
 	@cp $(SCRIPT_FILE) $(STAGE_DIR)/$(BIN)-windows-amd64/
 	@cp $(CONFIG_FILES) $(STAGE_DIR)/$(BIN)-windows-amd64/
 	@cp $(DOC_FILES) $(STAGE_DIR)/$(BIN)-windows-amd64/
+	@mkdir -p $(STAGE_DIR)/$(BIN)-windows-amd64/docs/images
+	@cp docs/images/ui-overview.svg $(STAGE_DIR)/$(BIN)-windows-amd64/docs/images/
 	@cd $(STAGE_DIR) && zip -qr ../$(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip $(BIN)-windows-amd64
 	@echo ">>> $(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip"
 
