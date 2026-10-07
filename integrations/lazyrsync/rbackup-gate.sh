@@ -165,7 +165,6 @@ fi
 if [ "${#POSITIONAL[@]}" -lt 2 ]; then
     exec_real "${PASS[@]}"
 fi
-SRC_ARG="${POSITIONAL[${#POSITIONAL[@]}-2]}"
 DST_ARG="${POSITIONAL[${#POSITIONAL[@]}-1]}"
 CHECK_PATH="${MOUNT_PATH:-$DST_ARG}"
 
@@ -212,7 +211,7 @@ fi
 
 if [ "$RC" -ne 0 ]; then
     gate_exit "[GATE][FAIL] 任务 '$TASK_NAME'：无法检查 '$CHECK_PATH'（ssh/探测失败 rc=$RC）
-           排查： ssh -o BatchMode=yes ${REMOTE_SPEC} 'realpath -m $LOCAL_PATH && findmnt -rn -T $(realpath -m $LOCAL_PATH) -o TARGET,FSTYPE'"
+           排查： ssh -o BatchMode=yes \"${REMOTE_SPEC}\" 'realpath -m \"$LOCAL_PATH\" && findmnt -rn -T \$(realpath -m \"$LOCAL_PATH\") -o TARGET,FSTYPE'"
 fi
 
 STATUS=""; DETAIL=""; BLOCKED=0; ALLOWED_DESC=""
@@ -281,7 +280,7 @@ if [ "$BLOCKED" -eq 1 ]; then
     esac
     if [ -n "$REMOTE_SPEC" ]; then
         MSG="$MSG
-           排查(远端): ssh ${REMOTE_SPEC} 'realpath -m $LOCAL_PATH && findmnt -rn -T \$(realpath -m $LOCAL_PATH) -o TARGET,FSTYPE'"
+           排查(远端): ssh \"${REMOTE_SPEC}\" 'realpath -m \"$LOCAL_PATH\" && findmnt -rn -T \$(realpath -m \"$LOCAL_PATH\") -o TARGET,FSTYPE'"
     fi
     gate_exit "$MSG"
 fi

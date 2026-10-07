@@ -135,20 +135,47 @@ case "$PREFIX" in
     *) PREFIX="$PWD/$PREFIX" ;;
 esac
 
-if [ "$MODE" = "system" ] && [ "$OS" = "linux" ]; then
-    BINDIR="$PREFIX/bin"
-    SHAREDIR="$PREFIX/share/$BIN_NAME"
-else
-    BINDIR="$PREFIX/bin"
-    SHAREDIR="$PREFIX/share/$BIN_NAME"
-fi
-# 用户级的共享目录用 ~/rbackup-tui，与程序内置发现路径一致
+BINDIR="$PREFIX/bin"
+SHAREDIR="$PREFIX/share/$BIN_NAME"
+
+# 应用数据（示例 / 文档 / 安装清单）：遵循 XDG_DATA_HOME
 if [ "$MODE" = "user" ]; then
-    DATADIR="$HOME/rbackup-tui"
+    DATADIR="${XDG_DATA_HOME:-$HOME/.local/share}/$BIN_NAME"
 else
     DATADIR="$SHAREDIR"
 fi
 MANIFEST="$DATADIR/install-manifest.txt"
+
+# 配置目录：程序用 os.UserConfigDir() 解析（Linux $XDG_CONFIG_HOME 或 ~/.config，
+# Windows %AppData%），这里复刻同一规则，保证安装器写的位置程序读得到。
+if [ "$OS" = "windows" ]; then
+    _appdata="${APPDATA:-$HOME/AppData/Roaming}"
+    if command -v cygpath >/dev/null 2>&1; then
+        _appdata="$(cygpath -u "$_appdata" 2>/dev/null || printf '%s' "$_appdata")"
+    fi
+    CONFIGDIR="$_appdata/$BIN_NAME"
+else
+    CONFIGDIR="${XDG_CONFIG_HOME:-$HOME/.config}/$BIN_NAME"
+fi
+
+# 系统级安装：配置属于"调用 sudo 的那个用户"，不能写进 root 的家目录
+# （Windows 没有 sudo 概念，--system 只是装到 %LOCALAPPDATA% 下的独立目录，
+#   配置仍按当前用户的 %AppData%）
+CONFIG_OWNER=""
+if [ "$MODE" = "system" ] && [ "$OS" != "windows" ]; then
+    _target_user="${SUDO_USER:-}"
+    if [ -n "$_target_user" ] && [ "$_target_user" != "root" ]; then
+        _target_home="$(getent passwd "$_target_user" 2>/dev/null | cut -d: -f6)"
+        if [ -n "$_target_home" ] && [ -d "$_target_home" ]; then
+            CONFIGDIR="$_target_home/.config/$BIN_NAME"
+            CONFIG_OWNER="$_target_user"
+        else
+            CONFIGDIR=""    # 解析不到目标用户 → 不写配置，只打印指引
+        fi
+    else
+        CONFIGDIR=""
+    fi
+fi
 
 if [ "$MODE" = "system" ] && [ "$OS" = "linux" ] && [ "$(id -u)" -ne 0 ] && [ "$DO_DRY_RUN" -eq 0 ]; then
     die "系统级安装需要 root，请用：curl -fsSL <url>/install.sh | sudo bash -s -- --system"
@@ -302,7 +329,7 @@ if [ "$DO_UNINSTALL" -eq 1 ]; then
         rmdir "$DATADIR/examples" 2>/dev/null || true
         rm -f "$MANIFEST"
         ok "卸载完成，共移除 $removed 个文件"
-        info "配置与日志已保留：$DATADIR"
+        info "配置与日志已保留：${CONFIGDIR:-$HOME/.config/$BIN_NAME}"
     fi
     exit 0
 fi
@@ -423,7 +450,13 @@ if [ "$DO_DRY_RUN" -eq 1 ]; then
     info "[dry-run]   $BINDIR/$SCRIPT_NAME"
     info "[dry-run]   $DATADIR/examples/{config1,config2}.ini.example"
     info "[dry-run]   $DATADIR/{README.md,LICENSE}"
-    [ "$DO_CONFIG" -eq 1 ] && info "[dry-run]   $DATADIR/config.ini（不存在才创建）"
+    if [ "$DO_CONFIG" -eq 1 ]; then
+        if [ -n "$CONFIGDIR" ]; then
+            info "[dry-run]   $CONFIGDIR/config.ini（不存在才创建）"
+        else
+            info "[dry-run]   配置骨架：跳过（系统级安装无法确定目标用户，将打印手工指引）"
+        fi
+    fi
     exit 0
 fi
 
@@ -447,14 +480,31 @@ for f in README.md LICENSE; do
     fi
 done
 
-# 配置骨架：只补不覆盖
-if [ "$DO_CONFIG" -eq 1 ] && [ ! -f "$DATADIR/config.ini" ]; then
-    if [ -f "$DATADIR/examples/config2.ini.example" ]; then
-        install -m 0644 "$DATADIR/examples/config2.ini.example" "$DATADIR/config.ini"
-        ok "已生成配置骨架 $DATADIR/config.ini（请修改其中的 HOST / SSH_KEY）"
+# ---------- 配置骨架：只补不覆盖 ----------
+CONFIG_PATH=""
+if [ "$DO_CONFIG" -eq 1 ]; then
+    if [ -z "$CONFIGDIR" ]; then
+        warn "系统级安装：未确定目标用户，跳过配置骨架"
+        info "请让每个用户自行执行一次，或手工创建 ~/.config/$BIN_NAME/config.ini"
+        info "样例：$DATADIR/examples/config2.ini.example"
+    else
+        CONFIG_PATH="$CONFIGDIR/config.ini"
+        mkdir -p "$CONFIGDIR"
+        if [ -n "$CONFIG_OWNER" ]; then
+            chown "$CONFIG_OWNER" "$CONFIGDIR" 2>/dev/null || true
+        fi
+        if [ ! -f "$CONFIG_PATH" ]; then
+            if [ -f "$DATADIR/examples/config2.ini.example" ]; then
+                install -m 0644 "$DATADIR/examples/config2.ini.example" "$CONFIG_PATH"
+                if [ -n "$CONFIG_OWNER" ]; then
+                    chown "$CONFIG_OWNER" "$CONFIG_PATH" 2>/dev/null || true
+                fi
+                ok "已生成配置骨架 $CONFIG_PATH（请修改其中的 HOST / SSH_KEY）"
+            fi
+        else
+            info "已存在配置，未覆盖：$CONFIG_PATH"
+        fi
     fi
-elif [ -f "$DATADIR/config.ini" ]; then
-    info "已存在配置，未覆盖：$DATADIR/config.ini"
 fi
 
 # ---------- 安装清单 ----------
@@ -471,7 +521,8 @@ ok "安装完成：$BIN_NAME $VERSION（$MODE 级）"
 printf '\n' >&2
 info "主程序   $BINDIR/$BIN_NAME$EXE"
 info "后端脚本 $BINDIR/$SCRIPT_NAME"
-info "配置     $DATADIR/config.ini"
+[ -n "$CONFIG_PATH" ] && info "配置     $CONFIG_PATH"
+info "示例文档 $DATADIR"
 info "清单     $MANIFEST"
 printf '\n' >&2
 

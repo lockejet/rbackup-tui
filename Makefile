@@ -354,15 +354,23 @@ install-lazy:
 
 .PHONY: uninstall
 uninstall:
-	@if [ -f "$(HOME)/rbackup-tui/install-manifest.txt" ]; then \
-		echo ">>> 按安装清单卸载（保留配置与日志）"; \
-		if [ -f ./install.sh ]; then \
-			bash ./install.sh --uninstall; \
-		else \
-			echo "错误: 当前目录没有 install.sh"; \
-			echo "请运行: curl -fsSL https://github.com/$(REPO)/releases/latest/download/install.sh | bash -s -- --uninstall"; \
-			exit 1; \
-		fi; \
+	@user_manifest="$(HOME)/.local/share/$(BIN)/install-manifest.txt"; \
+	sys_manifest="/usr/local/share/$(BIN)/install-manifest.txt"; \
+	legacy_manifest="$(HOME)/rbackup-tui/install-manifest.txt"; \
+	if [ -f "$$sys_manifest" ] && [ "$$(id -u)" -eq 0 ]; then \
+		echo ">>> 卸载系统级安装（按安装清单）"; \
+		bash ./install.sh --system --uninstall; \
+	elif [ -f "$$user_manifest" ]; then \
+		echo ">>> 卸载用户级安装（按安装清单，保留配置与日志）"; \
+		bash ./install.sh --uninstall; \
+	elif [ -f "$$legacy_manifest" ]; then \
+		echo ">>> 卸载旧布局安装（清单：$$legacy_manifest，保留配置）"; \
+		while IFS= read -r f; do \
+			case "$$f" in ''|'#'*) continue ;; esac; \
+			rm -f "$$f" && echo "  已删除 $$f"; \
+		done < "$$legacy_manifest"; \
+		rm -f "$$legacy_manifest"; \
+		echo ">>> 完成"; \
 	else \
 		echo ">>> 卸载手动安装的文件（保留配置目录）"; \
 		rm -f "$(DESTDIR)$(BINDIR)/$(BIN)$(SUFFIX)" \
