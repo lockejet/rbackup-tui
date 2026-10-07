@@ -6,27 +6,98 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 - TUI 框架: tview + tcell
 - 后端: rbackup.sh
 - 平台: Linux、Windows (MSYS2)
-- 当前版本: v1.1.5
 
 ---
 
 ## 目录
 
-- 功能
-- 界面说明
-- 安装
-- 配置
-- 使用
-- 快捷键
-- 挂载门禁
-- 统计与日志
-- 常见问题排查
-- 构建
-- 打包与发布
-- 环境变量
-- 常见问题
-- 文件结构
-- 作者
+- [功能](#功能)
+- [界面说明](#界面说明)
+  - [布局尺寸](#布局尺寸)
+  - [焦点区（3 个）](#焦点区3-个)
+  - [状态栏（3 行）](#状态栏3-行)
+  - [顶部信息](#顶部信息)
+- [安装](#安装)
+  - [方式一：懒人模式（不需要源码，不需要 Go）](#方式一懒人模式不需要源码不需要-go)
+  - [方式二：git clone 模式（不需要 Go）](#方式二git-clone-模式不需要-go)
+  - [方式三：手动模式（源码 + Go，自己编译）](#方式三手动模式源码--go自己编译)
+  - [卸载](#卸载)
+  - [手动解压（不想用安装器）](#手动解压不想用安装器)
+- [配置](#配置)
+  - [全局配置](#全局配置)
+  - [任务配置](#任务配置)
+  - [关于 --chown](#关于---chown)
+  - [关于时间戳](#关于时间戳)
+  - [示例配置一：明文源 → 明文挂载点](#示例配置一明文源--明文挂载点)
+  - [示例配置二：密文源 → 密文目录](#示例配置二密文源--密文目录)
+  - [两份示例的对比](#两份示例的对比)
+  - [使用示例配置](#使用示例配置)
+- [使用](#使用)
+  - [启动](#启动)
+  - [命令行参数](#命令行参数)
+  - [脚本路径查找顺序](#脚本路径查找顺序)
+  - [典型流程](#典型流程)
+- [快捷键](#快捷键)
+  - [全局](#全局)
+  - [焦点 1：信息区（header）](#焦点-1信息区header)
+  - [焦点 2：任务区（table + 命令区）](#焦点-2任务区table--命令区)
+  - [焦点 3：交互区（interact）](#焦点-3交互区interact)
+  - [空闲状态（无运行、无确认）](#空闲状态无运行无确认)
+  - [运行中（任何焦点）](#运行中任何焦点)
+  - [危险确认中（交互区焦点）](#危险确认中交互区焦点)
+- [挂载门禁](#挂载门禁)
+  - [语义](#语义)
+  - [require_mounted](#require_mounted)
+  - [require_unmounted](#require_unmounted)
+  - [两者互斥](#两者互斥)
+  - [软链接挂载点](#软链接挂载点)
+- [统计与日志](#统计与日志)
+  - [文件位置](#文件位置)
+  - [统计文件格式](#统计文件格式)
+  - [用命令行读取统计](#用命令行读取统计)
+  - [日志与 TUI 的关系](#日志与-tui-的关系)
+  - [运行时长与数据](#运行时长与数据)
+  - [分隔线](#分隔线)
+  - [退出码](#退出码)
+- [常见问题排查](#常见问题排查)
+  - [挂载检查误报"未挂载"](#挂载检查误报未挂载)
+  - [rsync 报"failed to set times"](#rsync-报failed-to-set-times)
+  - [rsync 报"You can only specify a user-affecting --chown once"](#rsync-报you-can-only-specify-a-user-affecting---chown-once)
+  - [rsync 报"Permission denied (13)"](#rsync-报permission-denied-13)
+  - [日志里中文显示为 \#345\#267\#245](#日志里中文显示为-345267245)
+- [构建](#构建)
+  - [本地平台](#本地平台)
+  - [交叉编译](#交叉编译)
+  - [产物位置](#产物位置)
+  - [版本注入](#版本注入)
+- [打包与发布](#打包与发布)
+  - [打包](#打包)
+  - [发布到 GitHub Release](#发布到-github-release)
+  - [本地打包（不上传）](#本地打包不上传)
+  - [其他发布命令](#其他发布命令)
+  - [参数](#参数)
+- [环境变量](#环境变量)
+- [常见问题](#常见问题)
+  - [F1 无反应？](#f1-无反应)
+  - [按 F1 或 ? 后帮助浮层出现但按键无响应？](#按-f1-或--后帮助浮层出现但按键无响应)
+  - [Windows 下按键重复触发？](#windows-下按键重复触发)
+  - [Windows 下 ESC 无法退出？](#windows-下-esc-无法退出)
+  - [Linux 下 rbackup-tui 找不到 bash？](#linux-下-rbackup-tui-找不到-bash)
+  - [rsync 输出没显示？](#rsync-输出没显示)
+  - [日志目录不可写？](#日志目录不可写)
+  - [如何只做挂载检查？](#如何只做挂载检查)
+  - [危险确认时怎么快速跳过全部？](#危险确认时怎么快速跳过全部)
+  - [如何强制退出？](#如何强制退出)
+  - [顶部日志和统计路径显示为相对路径？](#顶部日志和统计路径显示为相对路径)
+  - [统计文件去哪了？](#统计文件去哪了)
+  - [状态栏按键提示方括号 `[a]` 显示不出来？](#状态栏按键提示方括号-a-显示不出来)
+  - [按 Enter / d 后 TUI 卡死？](#按-enter--d-后-tui-卡死)
+  - [命令太长显示不全？](#命令太长显示不全)
+  - [日志行太长看不全？](#日志行太长看不全)
+  - [想看终端首行/末行？](#想看终端首行末行)
+- [文件结构](#文件结构)
+- [作者](#作者)
+- [许可证](#许可证)
 
 ---
 
@@ -54,31 +125,43 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 
 ## 界面说明
 
-以 config1.ini.example 为例（终端高度 >= 31 行时完整显示）：
+![rbackup-tui 界面示意](docs/images/ui-overview.svg)
 
-    ┌─ rbackup ─────────────────────────────────────────────────────────────────────┐
-    │ 脚本: ~/rbackup/rbackup.sh  配置: config1.ini  策略: skip（门禁失败时跳过）    │
-    │ 远端: admin@example.com:22  日志: ~/rbackup/log/rbackup_20260928_1922.log  统计: ~/rbackup/log/rbackup_20260928_1922.stats │
-    ├─ [2] 任务列表 ────────────────────────────────────────────────────────────────┤
-    │  ● 任务名         源                              目标              门禁       │
-    │  ● alice          /d/alice/my_company/            /srv/.../doc-alice  已挂载    │
-    │  ● bob            /d/bob/my_company/              /srv/.../doc-bob    已挂载    │
-    │  ○ charlie        /d/charlie/DevOps               /srv/st1000dm        —        │
-    │  ○ Test1          ~/rsync/test1.d/                /srv/st1000dm/t1    已挂载    │
-    │  ○ Test2          ~/rsync/test2.d/                /srv/st1000dm/t2    未挂载    │
-    │                                                                                │
-    │  > 命令: rsync -avzhu --progress --delete --exclude='/.deleted_files/'         │
-    │    --backup --backup-dir="/srv/.../rbackup/<ts>" -e "ssh -p 22 -i ..." ...     │
-    ├─ [3] 交互区 ──────────────────────────────────────────────────────────────────┤
-    │ [2026-09-28 19:24:10] 开始实际执行：共 2 个任务                                 │
-    │ >>> [1/2] alice 成功    用时: 47s    累积: 成功 1  跳过 0  失败 0  挂载门禁失败 0│
-    │       传输: 文件: 8/463  总大小: 26.00M  数据: 发送 28.97K + 接收 330B  速率: 661.60 KB/s  列表: 3s  执行: 45s │
-    │ ...                                                                            │
-    ├────────────────────────────────────────────────────────────────────────────────┤
-    │ 运行中   进度 2/5   当前 bob   成功 1 跳过 0 失败 0 挂载门禁失败 0   用时 1min32s│
-    │ 滚动: 移动[↑↓/jk] 横滚[←→/hl] 翻页[PgUp/PgDn] 纵首尾[g/G] 横首尾[0/$]  选择: 勾选[空格] 全选[a] 清空[n]  执行: 运行[Enter] 预览[d] 挂载检查[m] 刷新[r] │
-    │ 全局: 切换[Tab] 直选[1/2/3] 停止[Ctrl+C] 强退[Ctrl+D×3] 退出[q] 帮助[F1/?]     │
-    └────────────────────────────────────────────────────────────────────────────────┘
+上图由 `tools/gen-ui-preview.py` 生成（矢量图，可随界面调整重新生成）。
+终端高度 ≥ 31 行时完整显示；下面折叠块是同一布局的等宽纯文本版。
+
+<details>
+<summary>纯文本版（终端 / 离线阅读）</summary>
+
+```text
+┌─ rbackup ─────────────────────────────────────────────────────────────────────────────┐
+│脚本: ~/.local/bin/rbackup.sh   配置: ~/.config/rbackup-tui/config.ini                  │
+│远端: admin@example.com:22   策略: skip（门禁失败时跳过）                               │
+│日志: ~/.local/state/rbackup-tui/log/20260928_1922.log                                  │
+│统计: ~/.local/state/rbackup-tui/log/20260928_1922.stats                                │
+├─ [2] 任务列表 ────────────────────────────────────────────────────────────────────────┤
+│    任务名          源                                目标                  门禁        │
+│  ● alice           /d/alice/my_company/              /srv/.../doc-alice    已挂载      │
+│  ● bob             /d/bob/my_company/                /srv/.../doc-bob      已挂载      │
+│  ○ charlie         /d/charlie/DevOps                 /srv/st1000dm         —           │
+│  ○ Test1           ~/rsync/test1.d/                  /srv/st1000dm/t1      已挂载      │
+│  ○ Test2           ~/rsync/test2.d/                  /srv/st1000dm/t2      未挂载      │
+│                                                                                        │
+│> 命令: rsync -avzhu --progress --delete --exclude='/.deleted_files/'                   │
+│  --backup --backup-dir="/srv/.../rbackup/<ts>" -e "ssh -p 22 -i ..." ...               │
+├─ [3] 交互区 ──────────────────────────────────────────────────────────────────────────┤
+│[2026-09-28 19:24:10] 开始实际执行：共 2 个任务                                         │
+│>>> [1/2] alice 成功    用时: 47s    累积: 成功 1  跳过 0  失败 0  挂载门禁失败 0       │
+│     传输: 文件: 8/463  总大小: 26.00M  数据: 发送 28.97K + 接收 330B  速率: 661.60 KB/s│
+│...                                                                                     │
+├───────────────────────────────────────────────────────────────────────────────────────┤
+│运行中   进度 2/5   当前 bob   成功 1 跳过 0 失败 0 挂载门禁失败 0   用时 1min32s       │
+│滚动: 移动[↑↓/jk] 横滚[←→/hl] 翻页[PgUp/PgDn]  选择: 勾选[空格] 全选[a] 清空[n]         │
+│全局: 切换[Tab] 直选[1/2/3] 停止[Ctrl+C] 退出[q] 帮助[F1/?]                             │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+</details>
 
 ### 布局尺寸
 
@@ -113,51 +196,6 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 
 ---
 
-## v1.1.5 变更
-
-### UI 重构
-
-- 焦点区从 2 个扩展为 3 个：**信息区(1) / 任务区(2) / 交互区(3)**
-- 底部状态栏从 1 行扩展为 3 行（状态 / 焦点按键 / 全局按键）
-- 新增**命令区**（固定 2 行，显示完整 rsync 命令，独立横滚）
-- header 与各区域支持**独立横向滚动**（`←→ / h l`）
-- 危险确认改为**状态栏第 1 行闪烁**（红/黄 500ms 交替），不再闪 interact 边框
-- 分隔线统一为 **80 个短横线**
-
-### 按键扩展（vim 风格）
-
-| 键 | 作用 |
-|---|---|
-| `g` / `G` / `Home` / `End` | 纵向首行 / 末行 |
-| `0` / `$` | 横向行首 / 行尾 |
-| `← →` / `h l` | 横向滚动一列 |
-| `↑ ↓` / `j k` | 纵向滚动一行 |
-
-### 输出格式统一
-
-- 头部信息去掉 `|` 分隔符，改用 2 空格
-- 命令前缀 `●` 改为 `>`
-- 单任务日志：4 行 → 2 行，字段顺序：**文件 → 总大小 → 数据 → 速率 → 列表 → 执行**
-- 汇总日志：10+ 行 → 3 行（分隔线 + 完成状态 + 统计行）
-- 传输字段统一加冒号：`文件: N/M  总大小: xx  数据: ...  速率: ...  列表: ...  执行: ...`
-
-### rbackup.sh 变更
-
-- 统计文件与日志文件同目录、同前缀、不同后缀（`.log` / `.stats`）
-- 任务完成/失败时写入 `[task]` 块（成功/失败/跳过/挂载门禁失败均写）
-- 脚本结束写入 `[summary]` 块
-- 输出 `[STATS]` 单行协议供 TUI 解析
-- 新增 `format_rate` 函数（`X.XX KB/s`）
-- 时长格式：`47s` 或 `3min15s`
-- 解析 rsync `--stats` 输出：文件数、总大小、发送/接收字节、列表生成时间
-
-### Bug 修复
-
-- 修复 `Enter` / `d` 进入危险确认后 TUI 死锁（`startStatusBlink` 首次渲染改为异步）
-- 修复状态栏按键提示 `[a]` `[n]` `[Enter]` 被 tview 当颜色标签吞掉（改用 `tview.Escape`）
-
----
-
 ## 安装
 
 三种方式，按你手上有什么选一种。
@@ -178,7 +216,7 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 |---|---|
 | `--system` | 系统级安装 |
 | `--prefix DIR` | 自定义安装前缀 |
-| `--version v1.1.5` | 指定版本（默认 latest） |
+| `--version vX.Y.Z` | 指定版本（默认 latest） |
 | `--from FILE` | 用本地预编译包安装（离线） |
 | `--uninstall` | 卸载（保留配置与日志） |
 | `--dry-run` | 只打印将要做什么 |
@@ -207,8 +245,8 @@ Windows（MSYS2 / Git Bash）下用户级安装到 `~/.local/bin`；`--system` �
 
     make install-prebuilt                 # 用户级，装当前检出对应的版本
     make install-prebuilt SYSTEM=1        # 系统级
-    make install-prebuilt VERSION=v1.1.5  # 指定版本
-    make install-prebuilt FROM=dist/rbackup-tui-v1.1.5-linux-amd64.tar.gz   # 离线
+    make install-prebuilt VERSION=vX.Y.Z  # 指定版本
+    make install-prebuilt FROM=dist/rbackup-tui-vX.Y.Z-linux-amd64.tar.gz   # 离线
 
 全程只下载预编译包，不会调用 `go`。
 
@@ -908,7 +946,7 @@ Makefile 会自动注入版本：
 - `BUILD_VERSION`：含 commit hash 和 dirty 标记，用于二进制内部（帮助浮层显示）
 - `VERSION`：纯 tag，用于文件名和 Release 版本号
 
-打 tag 后版本号显示为 `v1.1.5`，未打 tag 显示 `dev`。
+打 tag 后版本号显示为 `vX.Y.Z`，未打 tag 显示 `dev`。
 
 ---
 
@@ -920,9 +958,9 @@ Makefile 会自动注入版本：
 
 生成三个压缩包到 `dist/`：
 
-    rbackup-tui-v1.1.5-linux-amd64.tar.gz
-    rbackup-tui-v1.1.5-linux-arm64.tar.gz
-    rbackup-tui-v1.1.5-windows-amd64.zip
+    rbackup-tui-vX.Y.Z-linux-amd64.tar.gz
+    rbackup-tui-vX.Y.Z-linux-arm64.tar.gz
+    rbackup-tui-vX.Y.Z-windows-amd64.zip
 
 每个压缩包内含：
 
@@ -946,8 +984,8 @@ Makefile 会自动注入版本：
     git push
 
     # 2. 打 tag 并推送（用 -a 创建注释 tag）
-    git tag -a v1.1.6 -m "v1.1.6: ..."
-    git push origin v1.1.6
+    git tag -a vX.Y.Z -m "vX.Y.Z: ..."
+    git push origin vX.Y.Z
 
     # 3. 观察 workflow
     gh run watch
@@ -964,9 +1002,9 @@ Makefile 会自动注入版本：
 就是懒人模式入口，两者永远同版本。
 
     dist/
-    ├── rbackup-tui-v1.1.6-linux-amd64.tar.gz
-    ├── rbackup-tui-v1.1.6-linux-arm64.tar.gz
-    ├── rbackup-tui-v1.1.6-windows-amd64.zip
+    ├── rbackup-tui-vX.Y.Z-linux-amd64.tar.gz
+    ├── rbackup-tui-vX.Y.Z-linux-arm64.tar.gz
+    ├── rbackup-tui-vX.Y.Z-windows-amd64.zip
     ├── install.sh
     ├── SHA256SUMS
     └── RELEASE_NOTES.md
@@ -982,16 +1020,16 @@ Makefile 会自动注入版本：
 ### 其他发布命令
 
     # 校验已发布资产（下载 + 比对 SHA256SUMS + bash -n install.sh）
-    make verify-release VERSION=v1.1.6
+    make verify-release VERSION=vX.Y.Z
 
     # 应急手工上传（Actions 不可用时）
-    make release-upload VERSION=v1.1.6
+    make release-upload VERSION=vX.Y.Z
 
     # 只生成 notes 文件查看
-    make release-notes VERSION=v1.1.6
+    make release-notes VERSION=vX.Y.Z
 
     # 删除 Release（保留 tag）
-    make release-delete VERSION=v1.1.6
+    make release-delete VERSION=vX.Y.Z
 
 ### 参数
 
@@ -1059,7 +1097,7 @@ rbackup.sh 会自动回退到脚本同目录的 log/。
 
 ### 顶部日志和统计路径显示为相对路径？
 
-老版本问题，v1.1.3 起已修复。如果仍出现，检查二进制是否为最新编译。
+已修复。如果仍出现，检查二进制是否为最新编译。
 
 ### 统计文件去哪了？
 
@@ -1067,11 +1105,11 @@ rbackup.sh 会自动回退到脚本同目录的 log/。
 
 ### 状态栏按键提示方括号 `[a]` 显示不出来？
 
-老版本问题，v1.1.5 起已修复（改用 `tview.Escape`）。
+已修复（改用 `tview.Escape`）。
 
 ### 按 Enter / d 后 TUI 卡死？
 
-老版本问题，v1.1.5 起已修复（危险确认闪烁首次渲染改为异步）。
+已修复（危险确认闪烁首次渲染改为异步）。
 
 ### 命令太长显示不全？
 

@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="703" height="553" viewBox="0 0 703 553" role="img" aria-label="rbackup-tui 界面示意图" xml:space="preserve" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,&quot;Noto Sans Mono CJK SC&quot;,&quot;Noto Sans CJK SC&quot;,&quot;DejaVu Sans Mono&quot;,monospace" font-size="15.0">
+<rect x="0" y="0" width="703" height="553" rx="8" fill="#0d1117"/>
+<rect x="14.5" y="14.5" width="674.0" height="524.0" rx="4" fill="none" stroke="#3fb950" stroke-width="1"/>
+<rect x="15.0" y="455.0" width="673.0" height="63.0" fill="#161b22"/>
+<line x1="14" y1="14.5" x2="689.0" y2="14.5" stroke="#3fb950" stroke-width="1"/>
+<rect x="21.5" y="6.5" width="75.0" height="16" fill="#0d1117"/>
+<text x="21.5" y="29.1" fill="#7ee787" textLength="75.0" lengthAdjust="spacingAndGlyphs">─ rbackup </text>
+<text x="21.5" y="50.1" fill="#8b949e" textLength="45.0" lengthAdjust="spacingAndGlyphs">脚本: </text>
+<text x="66.5" y="50.1" fill="#e6edf3" textLength="172.5" lengthAdjust="spacingAndGlyphs">~/.local/bin/rbackup.sh</text>
+<text x="239.0" y="50.1" fill="#8b949e" textLength="67.5" lengthAdjust="spacingAndGlyphs">   配置: </text>
+<text x="306.5" y="50.1" fill="#e6edf3" textLength="240.0" lengthAdjust="spacingAndGlyphs">~/.config/rbackup-tui/config.ini</text>
+<text x="21.5" y="71.1" fill="#8b949e" textLength="45.0" lengthAdjust="spacingAndGlyphs">远端: </text>
+<text x="66.5" y="71.1" fill="#e6edf3" textLength="150.0" lengthAdjust="spacingAndGlyphs">admin@example.com:22</text>
+<text x="216.5" y="71.1" fill="#8b949e" textLength="67.5" lengthAdjust="spacingAndGlyphs">   策略: </text>
+<text x="284.0" y="71.1" fill="#3fb950" textLength="30.0" lengthAdjust="spacingAndGlyphs">skip</text>
+<text x="314.0" y="71.1" fill="#6e7681" textLength="135.0" lengthAdjust="spacingAndGlyphs">（门禁失败时跳过）</text>
+<text x="21.5" y="92.1" fill="#8b949e" textLength="45.0" lengthAdjust="spacingAndGlyphs">日志: </text>
+<text x="66.5" y="92.1" fill="#e6edf3" textLength="360.0" lengthAdjust="spacingAndGlyphs">~/.local/state/rbackup-tui/log/20260928_1922.log</text>
+<text x="21.5" y="113.1" fill="#8b949e" textLength="45.0" lengthAdjust="spacingAndGlyphs">统计: </text>
+<text x="66.5" y="113.1" fill="#e6edf3" textLength="375.0" lengthAdjust="spacingAndGlyphs">~/.local/state/rbackup-tui/log/20260928_1922.stats</text>
+<line x1="14" y1="119.5" x2="689.0" y2="119.5" stroke="#3fb950" stroke-width="1"/>
+<rect x="21.5" y="111.5" width="112.5" height="16" fill="#0d1117"/>
+<text x="21.5" y="134.1" fill="#7ee787" textLength="112.5" lengthAdjust="spacingAndGlyphs">─ [2] 任务列表 </text>
+<text x="51.5" y="155.1" fill="#8b949e" textLength="45.0" lengthAdjust="spacingAndGlyphs">任务名</text>
+<text x="171.5" y="155.1" fill="#8b949e" textLength="15.0" lengthAdjust="spacingAndGlyphs">源</text>
+<text x="426.5" y="155.1" fill="#8b949e" textLength="30.0" lengthAdjust="spacingAndGlyphs">目标</text>
+<text x="591.5" y="155.1" fill="#8b949e" textLength="30.0" lengthAdjust="spacingAndGlyphs">门禁</text>
+<text x="36.5" y="176.1" fill="#3fb950" textLength="7.5" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="51.5" y="176.1" fill="#e6edf3" textLength="37.5" lengthAdjust="spacingAndGlyphs">alice</text>
+<text x="171.5" y="176.1" fill="#c9d1d9" textLength="150.0" lengthAdjust="spacingAndGlyphs">/d/alice/my_company/</text>
+<text x="426.5" y="176.1" fill="#c9d1d9" textLength="135.0" lengthAdjust="spacingAndGlyphs">/srv/.../doc-alice</text>
+<text x="591.5" y="176.1" fill="#3fb950" textLength="45.0" lengthAdjust="spacingAndGlyphs">已挂载</text>
+<text x="36.5" y="197.1" fill="#3fb950" textLength="7.5" lengthAdjust="spacingAndGlyphs">●</text>
+<text x="51.5" y="197.1" fill="#e6edf3" textLength="22.5" lengthAdjust="spacingAndGlyphs">bob</text>
+<text x="171.5" y="197.1" fill="#c9d1d9" textLength="135.0" lengthAdjust="spacingAndGlyphs">/d/bob/my_company/</text>
+<text x="426.5" y="197.1" fill="#c9d1d9" textLength="120.0" lengthAdjust="spacingAndGlyphs">/srv/.../doc-bob</text>
+<text x="591.5" y="197.1" fill="#3fb950" textLength="45.0" lengthAdjust="spacingAndGlyphs">已挂载</text>
+<text x="36.5" y="218.1" fill="#6e7681" textLength="7.5" lengthAdjust="spacingAndGlyphs">○</text>
+<text x="51.5" y="218.1" fill="#e6edf3" textLength="52.5" lengthAdjust="spacingAndGlyphs">charlie</text>
+<text x="171.5" y="218.1" fill="#c9d1d9" textLength="127.5" lengthAdjust="spacingAndGlyphs">/d/charlie/DevOps</text>
+<text x="426.5" y="218.1" fill="#c9d1d9" textLength="97.5" lengthAdjust="spacingAndGlyphs">/srv/st1000dm</text>
+<text x="591.5" y="218.1" fill="#6e7681" textLength="7.5" lengthAdjust="spacingAndGlyphs">—</text>
+<text x="36.5" y="239.1" fill="#6e7681" textLength="7.5" lengthAdjust="spacingAndGlyphs">○</text>
+<text x="51.5" y="239.1" fill="#e6edf3" textLength="37.5" lengthAdjust="spacingAndGlyphs">Test1</text>
+<text x="171.5" y="239.1" fill="#c9d1d9" textLength="120.0" lengthAdjust="spacingAndGlyphs">~/rsync/test1.d/</text>
+<text x="426.5" y="239.1" fill="#c9d1d9" textLength="120.0" lengthAdjust="spacingAndGlyphs">/srv/st1000dm/t1</text>
+<text x="591.5" y="239.1" fill="#3fb950" textLength="45.0" lengthAdjust="spacingAndGlyphs">已挂载</text>
+<text x="36.5" y="260.1" fill="#6e7681" textLength="7.5" lengthAdjust="spacingAndGlyphs">○</text>
+<text x="51.5" y="260.1" fill="#e6edf3" textLength="37.5" lengthAdjust="spacingAndGlyphs">Test2</text>
+<text x="171.5" y="260.1" fill="#c9d1d9" textLength="120.0" lengthAdjust="spacingAndGlyphs">~/rsync/test2.d/</text>
+<text x="426.5" y="260.1" fill="#c9d1d9" textLength="120.0" lengthAdjust="spacingAndGlyphs">/srv/st1000dm/t2</text>
+<text x="591.5" y="260.1" fill="#f85149" textLength="45.0" lengthAdjust="spacingAndGlyphs">未挂载</text>
+<text x="21.5" y="302.1" fill="#58a6ff" textLength="15.0" lengthAdjust="spacingAndGlyphs">&gt; </text>
+<text x="36.5" y="302.1" fill="#8b949e" textLength="45.0" lengthAdjust="spacingAndGlyphs">命令: </text>
+<text x="81.5" y="302.1" fill="#79c0ff" textLength="457.5" lengthAdjust="spacingAndGlyphs">rsync -avzhu --progress --delete --exclude='/.deleted_files/'</text>
+<text x="36.5" y="323.1" fill="#79c0ff" textLength="532.5" lengthAdjust="spacingAndGlyphs">--backup --backup-dir="/srv/.../rbackup/&lt;ts&gt;" -e "ssh -p 22 -i ..." ...</text>
+<line x1="14" y1="329.5" x2="689.0" y2="329.5" stroke="#3fb950" stroke-width="1"/>
+<rect x="21.5" y="321.5" width="97.5" height="16" fill="#0d1117"/>
+<text x="21.5" y="344.1" fill="#7ee787" textLength="97.5" lengthAdjust="spacingAndGlyphs">─ [3] 交互区 </text>
+<text x="21.5" y="365.1" fill="#58a6ff" textLength="165.0" lengthAdjust="spacingAndGlyphs">[2026-09-28 19:24:10] </text>
+<text x="186.5" y="365.1" fill="#c9d1d9" textLength="187.5" lengthAdjust="spacingAndGlyphs">开始实际执行：共 2 个任务</text>
+<text x="21.5" y="386.1" fill="#58a6ff" textLength="75.0" lengthAdjust="spacingAndGlyphs">&gt;&gt;&gt; [1/2] </text>
+<text x="96.5" y="386.1" fill="#3fb950" textLength="75.0" lengthAdjust="spacingAndGlyphs">alice 成功</text>
+<text x="171.5" y="386.1" fill="#c9d1d9" textLength="457.5" lengthAdjust="spacingAndGlyphs">    用时: 47s    累积: 成功 1  跳过 0  失败 0  挂载门禁失败 0</text>
+<text x="21.5" y="407.1" fill="#8b949e" textLength="82.5" lengthAdjust="spacingAndGlyphs">     传输: </text>
+<text x="104.0" y="407.1" fill="#c9d1d9" textLength="577.5" lengthAdjust="spacingAndGlyphs">文件: 8/463  总大小: 26.00M  数据: 发送 28.97K + 接收 330B  速率: 661.60 KB/s</text>
+<text x="21.5" y="428.1" fill="#6e7681" textLength="22.5" lengthAdjust="spacingAndGlyphs">...</text>
+<line x1="14" y1="434.5" x2="689.0" y2="434.5" stroke="#3fb950" stroke-width="1"/>
+<text x="21.5" y="470.1" fill="#7ee787" textLength="232.5" lengthAdjust="spacingAndGlyphs">运行中   进度 2/5   当前 bob   </text>
+<text x="254.0" y="470.1" fill="#c9d1d9" textLength="375.0" lengthAdjust="spacingAndGlyphs">成功 1 跳过 0 失败 0 挂载门禁失败 0   用时 1min32s</text>
+<text x="21.5" y="491.1" fill="#c9d1d9" textLength="45.0" lengthAdjust="spacingAndGlyphs">滚动: </text>
+<text x="66.5" y="491.1" fill="#8b949e" textLength="292.5" lengthAdjust="spacingAndGlyphs">移动[↑↓/jk] 横滚[←→/hl] 翻页[PgUp/PgDn]</text>
+<text x="359.0" y="491.1" fill="#c9d1d9" textLength="60.0" lengthAdjust="spacingAndGlyphs">  选择: </text>
+<text x="419.0" y="491.1" fill="#8b949e" textLength="195.0" lengthAdjust="spacingAndGlyphs">勾选[空格] 全选[a] 清空[n]</text>
+<text x="21.5" y="512.1" fill="#c9d1d9" textLength="45.0" lengthAdjust="spacingAndGlyphs">全局: </text>
+<text x="66.5" y="512.1" fill="#8b949e" textLength="397.5" lengthAdjust="spacingAndGlyphs">切换[Tab] 直选[1/2/3] 停止[Ctrl+C] 退出[q] 帮助[F1/?]</text>
+<line x1="14" y1="538.5" x2="689.0" y2="538.5" stroke="#3fb950" stroke-width="1"/>
+</svg>
