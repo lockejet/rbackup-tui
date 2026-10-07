@@ -102,5 +102,10 @@ jobs:
           fi
           echo "✓ 不存在的版本被正确拒绝"
 
+      - name: README 目录链接校验
+        run: |
+          python3 tools/gen-toc.py --check
+          python3 tools/gen-ui-preview.py >/dev/null && echo "✓ 界面示意图生成器可运行"
+
       - name: 挂载门禁集成自测
         run: bash integrations/lazyrsync/test-gate.sh
