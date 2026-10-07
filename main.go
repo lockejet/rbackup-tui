@@ -237,6 +237,26 @@ type App struct {
 }
 
 // ---------- 路径查找 ----------
+
+// xdgConfigDir 返回用户配置根目录：Linux 为 $XDG_CONFIG_HOME 或 ~/.config，
+// Windows 为 %AppData%，macOS 为 ~/Library/Application Support。
+func xdgConfigDir() string {
+	if d, err := os.UserConfigDir(); err == nil && d != "" {
+		return d
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config")
+}
+
+// xdgStateDir 返回用户状态根目录（Linux 为 $XDG_STATE_HOME 或 ~/.local/state）
+func xdgStateDir() string {
+	if d := os.Getenv("XDG_STATE_HOME"); d != "" && filepath.IsAbs(d) {
+		return d
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".local", "state")
+}
+
 func findScriptPath() string {
 	if p := os.Getenv("RBACKUP_SCRIPT"); p != "" {
 		return p
@@ -271,20 +291,28 @@ func findScriptPath() string {
 	return ""
 }
 
+// findConfigPath 按以下优先级解析配置文件：
+//
+//	-c/--config（在 NewApp 中覆盖）> RBACKUP_CONFIG > XDG 配置目录
+//	> ~/rbackup-tui/config.ini（过渡兼容）> ~/rbackup/config.ini（更旧布局）
 func findConfigPath() string {
 	if p := os.Getenv("RBACKUP_CONFIG"); p != "" {
 		return p
 	}
 	home, _ := os.UserHomeDir()
-	newPath := filepath.Join(home, "rbackup-tui", "config.ini")
-	oldPath := filepath.Join(home, "rbackup", "config.ini")
-	if _, err := os.Stat(newPath); err == nil {
-		return newPath
+	xdgPath := filepath.Join(xdgConfigDir(), "rbackup-tui", "config.ini")
+	legacyTui := filepath.Join(home, "rbackup-tui", "config.ini")
+	legacyOld := filepath.Join(home, "rbackup", "config.ini")
+	if _, err := os.Stat(xdgPath); err == nil {
+		return xdgPath
 	}
-	if _, err := os.Stat(oldPath); err == nil {
-		return oldPath // 旧布局，保持兼容
+	if _, err := os.Stat(legacyTui); err == nil {
+		return legacyTui // 过渡兼容：安装器旧版本把配置放在这里
 	}
-	return newPath
+	if _, err := os.Stat(legacyOld); err == nil {
+		return legacyOld // 更旧布局，保持兼容
+	}
+	return xdgPath
 }
 
 func NewApp() *App {
@@ -344,9 +372,17 @@ func dirWritable(dir string) bool {
 	return true
 }
 
+// resolveLogDir 与 rbackup.sh 的 LOG_DIR 回退链保持一致，否则 TUI 会找不到 .stats：
+//
+//	配置里的 LOG_DIR → $XDG_STATE_HOME/rbackup-tui/log（默认 ~/.local/state/…）
+//	→ <脚本同目录>/log（旧行为，最后兜底）
 func resolveLogDir(cfgLogDir, scriptPath string) string {
 	if dirWritable(cfgLogDir) {
 		return cfgLogDir
+	}
+	stateFallback := filepath.Join(xdgStateDir(), "rbackup-tui", "log")
+	if dirWritable(stateFallback) {
+		return stateFallback
 	}
 	if scriptPath != "" {
 		fallback := filepath.Join(filepath.Dir(scriptPath), "log")

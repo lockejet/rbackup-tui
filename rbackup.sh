@@ -278,7 +278,7 @@ while true; do
   SSH_PORT    SSH 端口（默认 22）
   SSH_USER    SSH 用户名（默认 admin）
   SSH_KEY     SSH 私钥路径（默认 ~/.ssh/id_ed25519）
-  LOG_DIR     日志目录（默认 /var/log/rbackup）
+  LOG_DIR     日志目录（默认 /var/log/rbackup；不可写时回退 $XDG_STATE_HOME/rbackup-tui/log）
   GLOBAL_OPTS rsync 全局选项
   RSYNC_PATH  提权命令
   MOUNT_POLICY 挂载门禁策略
@@ -490,15 +490,29 @@ log_dir_writable() {
     return 0
 }
 
+# XDG 状态目录（与 main.go 的 xdgStateDir 保持一致）
+xdg_state_dir() {
+    if [ -n "${XDG_STATE_HOME:-}" ] && [ "${XDG_STATE_HOME#/}" != "$XDG_STATE_HOME" ]; then
+        printf '%s' "$XDG_STATE_HOME"
+    else
+        printf '%s/.local/state' "$HOME"
+    fi
+}
+
 LOG_DIR_RESOLVED=""
+XDG_LOG_DIR="$(xdg_state_dir)/rbackup-tui/log"
 if log_dir_writable "$LOG_DIR"; then
     LOG_DIR_RESOLVED="$LOG_DIR"
+elif log_dir_writable "$XDG_LOG_DIR"; then
+    LOG_DIR_RESOLVED="$XDG_LOG_DIR"
+    echo "警告：无法写入 $LOG_DIR，日志回退到 $XDG_LOG_DIR/" >&2
 elif log_dir_writable "${SCRIPT_DIR}/log"; then
     LOG_DIR_RESOLVED="${SCRIPT_DIR}/log"
     echo "警告：无法写入 $LOG_DIR，日志回退到 ${SCRIPT_DIR}/log/" >&2
 else
     echo "错误：无法创建日志目录" >&2
     echo "      尝试过: $LOG_DIR" >&2
+    echo "      尝试过: $XDG_LOG_DIR" >&2
     echo "      尝试过: ${SCRIPT_DIR}/log" >&2
     echo "      请检查权限或修改配置中的 LOG_DIR" >&2
     exit 1

@@ -190,8 +190,12 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 |---|---|---|
 | 主程序 | `~/.local/bin/rbackup-tui` | `/usr/local/bin/rbackup-tui` |
 | 后端脚本 | `~/.local/bin/rbackup.sh` | `/usr/local/bin/rbackup.sh` |
-| 配置 / 日志 | `~/rbackup-tui/` | 仍按每个用户 `~/rbackup-tui/` |
-| 样例 / 文档 | `~/rbackup-tui/` | `/usr/local/share/rbackup-tui/` |
+| 配置 | `~/.config/rbackup-tui/config.ini` | 仍按调用 sudo 的那个用户：`~/.config/rbackup-tui/config.ini` |
+| 日志 | 配置里的 `LOG_DIR`；不可写时回退 `~/.local/state/rbackup-tui/log` | 同左 |
+| 样例 / 文档 | `~/.local/share/rbackup-tui/` | `/usr/local/share/rbackup-tui/` |
+
+各路径遵循 XDG 规范：`XDG_CONFIG_HOME`（Windows 为 `%AppData%`）、
+`XDG_STATE_HOME`、`XDG_DATA_HOME` 设置后按设置生效。
 
 Windows（MSYS2 / Git Bash）下用户级安装到 `~/.local/bin`；`--system` 装到
 `%LOCALAPPDATA%/Programs/rbackup-tui`（无需管理员权限）。
@@ -225,7 +229,7 @@ Windows（MSYS2 / Git Bash）下用户级安装到 `~/.local/bin`；`--system` �
     make uninstall                                          # 在克隆目录里执行
     curl -fsSL .../install.sh | bash -s -- --uninstall       # 预编译安装的
 
-只删除程序文件，保留 `~/rbackup-tui/` 下的配置与日志。
+只删除程序文件（含安装清单里记录的所有文件），保留 `~/.config/rbackup-tui/` 下的配置与日志。
 
 ### 手动解压（不想用安装器）
 
@@ -504,14 +508,14 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 
 ### 启动
 
-    # 默认读取 $HOME/rbackup-tui/config.ini
+    # 默认读取 $XDG_CONFIG_HOME/rbackup-tui/config.ini（即 ~/.config/rbackup-tui/config.ini）
     rbackup-tui
 
     # 指定配置
-    rbackup-tui -c ~/rbackup-tui/config1.ini
+    rbackup-tui -c ~/rbackup-tui/config-lnas.ini
 
     # 指定脚本
-    rbackup-tui -c ~/rbackup-tui/config1.ini -s ~/rbackup-tui/rbackup.sh
+    rbackup-tui -c ~/rbackup-tui/config-lnas.ini -s ~/.local/bin/rbackup.sh
 
 ### 命令行参数
 
@@ -531,8 +535,9 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 7. `$HOME/.local/bin/rbackup.sh`
 8. `PATH` 中的 `rbackup.sh` / `rbackup`
 
-配置路径查找顺序：`-c` → `RBACKUP_CONFIG` → `$HOME/rbackup-tui/config.ini`
-→ `$HOME/rbackup/config.ini`（旧布局）。
+配置路径查找顺序：`-c` / `--config` → `RBACKUP_CONFIG` →
+`$XDG_CONFIG_HOME/rbackup-tui/config.ini`（默认 `~/.config/rbackup-tui/config.ini`）→
+`$HOME/rbackup-tui/config.ini`（过渡兼容）→ `$HOME/rbackup/config.ini`（更旧布局）。
 
 全找不到时报错退出，提示用 `-s` 或 `RBACKUP_SCRIPT` 指定。
 
