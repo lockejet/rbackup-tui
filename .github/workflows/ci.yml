@@ -24,6 +24,9 @@ jobs:
       - name: go vet
         run: go vet .
 
+      - name: 单元测试
+        run: go test -v ./...
+
       - name: 构建当前平台
         run: go build -ldflags "-X main.Version=ci" -o /tmp/rbackup-tui .
 
@@ -42,7 +45,7 @@ jobs:
       - name: gofmt 提示（不阻塞）
         continue-on-error: true
         run: |
-          mapfile -t files < <(gofmt -l main.go config.go runner.go)
+          mapfile -t files < <(gofmt -l main.go config.go runner.go main_test.go)
           if [ "${#files[@]}" -gt 0 ]; then
             echo "::warning::以下文件未通过 gofmt: ${files[*]}"
             gofmt -d "${files[@]}" | head -60
@@ -68,6 +71,25 @@ jobs:
             bash -n "$f"
             echo "✓ bash -n $f"
           done
+
+      - name: rbackup.sh 参数冒烟（--help / --print-log-dir）
+        run: |
+          set -euo pipefail
+          # --help 必须可用且退出码为 0（曾因 set -u + heredoc 展开崩溃）
+          ./rbackup.sh --help >/dev/null
+          echo "✓ --help 可用"
+
+          # 日志目录必须遵循 XDG_STATE_HOME
+          dir="$(XDG_STATE_HOME=/tmp/xdg-state ./rbackup.sh --print-log-dir)"
+          test "$dir" = "/tmp/xdg-state/rbackup-tui/log" \
+            || { echo "✗ XDG 日志目录不符: $dir"; exit 1; }
+          echo "✓ XDG 日志目录: $dir"
+
+          # XDG_STATE_HOME 未设置时回退到 ~/.local/state
+          dir="$(env -u XDG_STATE_HOME HOME=/tmp/fake-home ./rbackup.sh --print-log-dir)"
+          test "$dir" = "/tmp/fake-home/.local/state/rbackup-tui/log" \
+            || { echo "✗ XDG 回退目录不符: $dir"; exit 1; }
+          echo "✓ XDG 回退目录: $dir"
 
       - name: shellcheck 新增脚本（阻塞）
         run: shellcheck --severity=error install.sh integrations/lazyrsync/rbackup-gate.sh

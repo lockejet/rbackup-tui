@@ -21,13 +21,47 @@ SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 # ---------- 80 个短横线分隔符 ----------
 SEP80="--------------------------------------------------------------------------------"
 
+# ---------- 平台判定与应用日志目录 ----------
+# 与 main.go 的 appLogDir 保持一致，否则 TUI 找不到 .stats：
+#   Windows: %LOCALAPPDATA%\rbackup-tui\Logs
+#   其他:    ${XDG_STATE_HOME:-$HOME/.local/state}/rbackup-tui/log
+is_windows() {
+    case "$(uname -s 2>/dev/null)" in
+        MINGW*|MSYS*|CYGWIN*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+app_log_dir() {
+    if is_windows; then
+        local base="${LOCALAPPDATA:-}"
+        if [ -z "$base" ]; then
+            base="${USERPROFILE:-$HOME}/AppData/Local"
+        fi
+        # MSYS/Cygwin 下 LOCALAPPDATA 可能是原生 Windows 路径（C:\Users\…），
+        # 先转成 POSIX 路径再参与路径拼接。
+        if [ "${base#/}" = "$base" ]; then
+            if command -v cygpath >/dev/null 2>&1; then
+                base="$(cygpath -u "$base")"
+            else
+                base="${base//\\//}"
+            fi
+        fi
+        printf '%s/rbackup-tui/Logs' "${base%/}"
+    elif [ -n "${XDG_STATE_HOME:-}" ] && [ "${XDG_STATE_HOME#/}" != "$XDG_STATE_HOME" ]; then
+        printf '%s/rbackup-tui/log' "${XDG_STATE_HOME%/}"
+    else
+        printf '%s/.local/state/rbackup-tui/log' "${HOME:-/tmp}"
+    fi
+}
+
 # ---------- 默认配置 ----------
 DEFAULT_CONFIG="${SCRIPT_DIR}/config.ini"
 DEFAULT_HOST="localhost"
 DEFAULT_SSH_PORT="22"
 DEFAULT_SSH_USER="admin"
 DEFAULT_SSH_KEY="${HOME}/.ssh/id_ed25519"
-DEFAULT_LOG_DIR="/var/log/rbackup"
+DEFAULT_LOG_DIR="$(app_log_dir)"
 DEFAULT_GLOBAL_OPTS="-avzhu --progress"
 DEFAULT_RSYNC_PATH="sudo rsync"
 DEFAULT_REMOVE_SOURCE="no"
@@ -201,7 +235,7 @@ expand_local_path() {
 
 # ---------- 解析命令行参数 ----------
 OPTS=$(getopt -o hC:AT:s:d:o:l \
-    --long help,config:,dry-run,all,tasks:,task:,src:,dst:,opts:,delete,sudo,list,remove-source-files,force,no-mount-check,check-mount,require-mounted,require-unmounted,mount-point:,mount-path:,mount-fstype: \
+    --long help,config:,dry-run,all,tasks:,task:,src:,dst:,opts:,delete,sudo,list,print-log-dir,remove-source-files,force,no-mount-check,check-mount,require-mounted,require-unmounted,mount-point:,mount-path:,mount-fstype: \
     -n "$0" -- "$@") || { echo "参数解析错误，请使用 -h 查看帮助" >&2; exit 2; }
 eval set -- "$OPTS"
 
@@ -224,6 +258,7 @@ while true; do
         --delete)              TEMP_DELETE=1; shift ;;
         --sudo)                ENABLE_RSYNC_PATH=1; shift ;;
         -l|--list)             LIST_MODE=1; shift ;;
+        --print-log-dir)       app_log_dir; echo; exit 0 ;;
         --remove-source-files) TEMP_REMOVE_SOURCE=1; shift ;;
         --force)               FORCE_MODE=1; shift ;;
         --no-mount-check)      NO_MOUNT_CHECK=1; shift ;;
@@ -264,6 +299,7 @@ while true; do
 
 通用:
   --force                 跳过所有交互确认（慎用）
+  --print-log-dir         打印默认日志目录后退出（不读配置）
   -h, --help              显示此帮助
 
 说明:
@@ -278,7 +314,8 @@ while true; do
   SSH_PORT    SSH 端口（默认 22）
   SSH_USER    SSH 用户名（默认 admin）
   SSH_KEY     SSH 私钥路径（默认 ~/.ssh/id_ed25519）
-  LOG_DIR     日志目录（默认 /var/log/rbackup；不可写时回退 $XDG_STATE_HOME/rbackup-tui/log）
+  LOG_DIR     日志目录（默认跟随平台：\$XDG_STATE_HOME/rbackup-tui/log，
+              Windows 为 %LOCALAPPDATA%\rbackup-tui\Logs）
   GLOBAL_OPTS rsync 全局选项
   RSYNC_PATH  提权命令
   MOUNT_POLICY 挂载门禁策略
@@ -490,29 +527,24 @@ log_dir_writable() {
     return 0
 }
 
-# XDG 状态目录（与 main.go 的 xdgStateDir 保持一致）
-xdg_state_dir() {
-    if [ -n "${XDG_STATE_HOME:-}" ] && [ "${XDG_STATE_HOME#/}" != "$XDG_STATE_HOME" ]; then
-        printf '%s' "$XDG_STATE_HOME"
-    else
-        printf '%s/.local/state' "$HOME"
-    fi
-}
+# 应用日志目录（与 app_log_dir 一致，供回退链使用）
+APP_LOG_DIR="$(app_log_dir)"
 
 LOG_DIR_RESOLVED=""
-XDG_LOG_DIR="$(xdg_state_dir)/rbackup-tui/log"
 if log_dir_writable "$LOG_DIR"; then
     LOG_DIR_RESOLVED="$LOG_DIR"
-elif log_dir_writable "$XDG_LOG_DIR"; then
-    LOG_DIR_RESOLVED="$XDG_LOG_DIR"
-    echo "警告：无法写入 $LOG_DIR，日志回退到 $XDG_LOG_DIR/" >&2
+elif log_dir_writable "$APP_LOG_DIR"; then
+    LOG_DIR_RESOLVED="$APP_LOG_DIR"
+    if [ "$LOG_DIR" != "$APP_LOG_DIR" ]; then
+        echo "警告：无法写入 $LOG_DIR，日志回退到 $APP_LOG_DIR/" >&2
+    fi
 elif log_dir_writable "${SCRIPT_DIR}/log"; then
     LOG_DIR_RESOLVED="${SCRIPT_DIR}/log"
     echo "警告：无法写入 $LOG_DIR，日志回退到 ${SCRIPT_DIR}/log/" >&2
 else
     echo "错误：无法创建日志目录" >&2
     echo "      尝试过: $LOG_DIR" >&2
-    echo "      尝试过: $XDG_LOG_DIR" >&2
+    echo "      尝试过: $APP_LOG_DIR" >&2
     echo "      尝试过: ${SCRIPT_DIR}/log" >&2
     echo "      请检查权限或修改配置中的 LOG_DIR" >&2
     exit 1

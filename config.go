@@ -52,7 +52,7 @@ func defaultGlobal() GlobalConfig {
 		SSHPort:      "22",
 		SSHUser:      "admin",
 		SSHKey:       "~/.ssh/id_ed25519",
-		LogDir:       "/var/log/rbackup",
+		LogDir:       defaultLogDir(),
 		GlobalOpts:   "-avzhu --progress",
 		RsyncPath:    "sudo rsync",
 		RemoveSource: "no",

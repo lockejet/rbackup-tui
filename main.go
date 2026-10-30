@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -257,6 +258,27 @@ func xdgStateDir() string {
 	return filepath.Join(home, ".local", "state")
 }
 
+// appLogDir 返回应用日志目录，与 rbackup.sh 的 app_log_dir 保持一致，
+// 否则 TUI 找不到 rbackup.sh 写出的 .stats：
+//
+//	Windows: %LOCALAPPDATA%\rbackup-tui\Logs
+//	其他:    ${XDG_STATE_HOME:-~/.local/state}/rbackup-tui/log
+func appLogDir(goos string) string {
+	if goos == "windows" {
+		if d := os.Getenv("LOCALAPPDATA"); d != "" {
+			return filepath.Join(d, "rbackup-tui", "Logs")
+		}
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, "AppData", "Local", "rbackup-tui", "Logs")
+	}
+	return filepath.Join(xdgStateDir(), "rbackup-tui", "log")
+}
+
+// defaultLogDir 返回当前平台的默认日志目录（config.ini 未写 LOG_DIR 时使用）。
+func defaultLogDir() string {
+	return appLogDir(runtime.GOOS)
+}
+
 func findScriptPath() string {
 	if p := os.Getenv("RBACKUP_SCRIPT"); p != "" {
 		return p
@@ -374,13 +396,13 @@ func dirWritable(dir string) bool {
 
 // resolveLogDir 与 rbackup.sh 的 LOG_DIR 回退链保持一致，否则 TUI 会找不到 .stats：
 //
-//	配置里的 LOG_DIR → $XDG_STATE_HOME/rbackup-tui/log（默认 ~/.local/state/…）
-//	→ <脚本同目录>/log（旧行为，最后兜底）
+//	配置里的 LOG_DIR → 平台默认目录（Windows %LOCALAPPDATA%\rbackup-tui\Logs，
+//	其他 $XDG_STATE_HOME/rbackup-tui/log）→ <脚本同目录>/log（旧行为，最后兜底）
 func resolveLogDir(cfgLogDir, scriptPath string) string {
 	if dirWritable(cfgLogDir) {
 		return cfgLogDir
 	}
-	stateFallback := filepath.Join(xdgStateDir(), "rbackup-tui", "log")
+	stateFallback := appLogDir(runtime.GOOS)
 	if dirWritable(stateFallback) {
 		return stateFallback
 	}
@@ -2044,7 +2066,9 @@ func (a *App) helpContent() string {
 	b.WriteString("[yellow::b]─── 关于 ────────────────────────────────────────────[-:-:-]\n")
 	b.WriteString("  rbackup-tui 是 rbackup.sh 的 TUI 前端\n")
 	b.WriteString("  配置文件: 与 rbackup.sh 共用 config.ini\n")
-	b.WriteString("  日志目录: 由 config.ini 的 LOG_DIR 决定\n")
+	b.WriteString("  日志目录: 由 config.ini 的 LOG_DIR 决定，默认跟随平台\n")
+	b.WriteString("            Linux: $XDG_STATE_HOME/rbackup-tui/log\n")
+	b.WriteString("            Windows: %LOCALAPPDATA%\\rbackup-tui\\Logs\n")
 	b.WriteString("\n")
 	b.WriteString("[gray]按 q 或 Esc 关闭本帮助[-]\n")
 

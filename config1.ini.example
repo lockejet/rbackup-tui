@@ -5,7 +5,10 @@ HOST=example.com
 SSH_PORT=22
 SSH_USER=admin
 SSH_KEY=~/.ssh/id_ed25519
-LOG_DIR=/var/log/rbackup
+# 日志目录（可选；不写则跟随平台：
+#   Linux   $XDG_STATE_HOME/rbackup-tui/log（默认 ~/.local/state/…）
+#   Windows %LOCALAPPDATA%\rbackup-tui\Logs）
+#LOG_DIR=/var/log/rbackup
 #GLOBAL_OPTS=-avzhu --progress
 GLOBAL_OPTS=-avzhu --progress --no-perms --no-times --omit-dir-times --update --delete-after --8-bit-output
 RSYNC_PATH=sudo rsync

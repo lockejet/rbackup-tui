@@ -229,11 +229,12 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 | 主程序 | `~/.local/bin/rbackup-tui` | `/usr/local/bin/rbackup-tui` |
 | 后端脚本 | `~/.local/bin/rbackup.sh` | `/usr/local/bin/rbackup.sh` |
 | 配置 | `~/.config/rbackup-tui/config.ini` | 仍按调用 sudo 的那个用户：`~/.config/rbackup-tui/config.ini` |
-| 日志 | 配置里的 `LOG_DIR`；不可写时回退 `~/.local/state/rbackup-tui/log` | 同左 |
+| 日志 | `LOG_DIR` 可覆盖；默认 `$XDG_STATE_HOME/rbackup-tui/log`（Windows `%LOCALAPPDATA%\rbackup-tui\Logs`） | 同左 |
 | 样例 / 文档 | `~/.local/share/rbackup-tui/` | `/usr/local/share/rbackup-tui/` |
 
 各路径遵循 XDG 规范：`XDG_CONFIG_HOME`（Windows 为 `%AppData%`）、
-`XDG_STATE_HOME`、`XDG_DATA_HOME` 设置后按设置生效。
+`XDG_STATE_HOME`、`XDG_DATA_HOME` 设置后按设置生效。日志在 Windows 上用
+`%LOCALAPPDATA%\rbackup-tui\Logs`（无 `XDG_STATE_HOME` 概念）。
 
 Windows（MSYS2 / Git Bash）下用户级安装到 `~/.local/bin`；`--system` 装到
 `%LOCALAPPDATA%/Programs/rbackup-tui`（无需管理员权限）。
@@ -303,7 +304,7 @@ rbackup-tui 与 rbackup.sh 共用 config.ini，格式一致。
 | SSH_PORT | SSH 端口 | 22 |
 | SSH_USER | SSH 用户名 | admin |
 | SSH_KEY | SSH 私钥路径 | ~/.ssh/id_ed25519 |
-| LOG_DIR | 日志目录 | /var/log/rbackup |
+| LOG_DIR | 日志目录（可选覆盖） | `$XDG_STATE_HOME/rbackup-tui/log`；Windows `%LOCALAPPDATA%\rbackup-tui\Logs` |
 | GLOBAL_OPTS | rsync 全局选项 | -avzhu --progress |
 | RSYNC_PATH | 提权命令 | sudo rsync |
 | DEFAULT_REMOVE_SOURCE | 源端删除默认值 | no |
@@ -392,7 +393,9 @@ rsync 只允许 `--chown` 出现一次。可以放在：
     HOST=example.com
     SSH_PORT=22
     SSH_KEY=~/.ssh/id_ed25519
-    LOG_DIR=/var/log/rbackup
+    # 日志目录（可选；不写则跟随平台：
+    #   Linux $XDG_STATE_HOME/rbackup-tui/log，Windows %LOCALAPPDATA%\rbackup-tui\Logs）
+    #LOG_DIR=/var/log/rbackup
     GLOBAL_OPTS=-avzhu --progress --no-perms --omit-dir-times --chown=admin:users --update --delete-after
     RSYNC_PATH=sudo rsync
     DEFAULT_REMOVE_SOURCE=no
@@ -467,8 +470,9 @@ rsync 只允许 `--chown` 出现一次。可以放在：
     SSH_PORT=22
     SSH_KEY=~/.ssh/id_ed25519
 
-    # 日志目录（自动生成 ${SCRIPT_NAME}_${DATE}.log 与 .stats）
-    LOG_DIR=/var/log
+    # 日志目录（可选；不写则跟随平台：
+    #   Linux $XDG_STATE_HOME/rbackup-tui/log，Windows %LOCALAPPDATA%\rbackup-tui\Logs）
+    #LOG_DIR=/var/log/rbackup
 
     # 全局 rsync 默认选项（可被任务级 opts 追加覆盖）
     GLOBAL_OPTS=-avzhu --progress --omit-dir-times
@@ -738,12 +742,22 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 
 日志和统计文件生成在同一个目录，文件名前缀相同，后缀不同：
 
-    ~/rbackup/log/rbackup_20260928_1922.log      完整日志
-    ~/rbackup/log/rbackup_20260928_1922.stats    统计报告
+    $XDG_STATE_HOME/rbackup-tui/log/rbackup_20260928_1922.log      完整日志
+    $XDG_STATE_HOME/rbackup-tui/log/rbackup_20260928_1922.stats    统计报告
+
+日志目录按以下顺序解析（`rbackup-tui` 采用同一套规则，否则它找不到 `.stats`）：
+
+1. `config.ini` 里的 `LOG_DIR`（显式指定，优先级最高）
+2. 平台默认目录：
+   - Linux / macOS：`$XDG_STATE_HOME/rbackup-tui/log`，未设置时为 `~/.local/state/rbackup-tui/log`
+   - Windows：`%LOCALAPPDATA%\rbackup-tui\Logs`
+3. `<rbackup.sh 所在目录>/log`（旧行为，最后兜底）
 
 文件名带时分（YYYYMMDD_HHMM），同一分钟内多次运行会覆盖同名文件。
 
-如果 `LOG_DIR` 不可写，两者一起回退到脚本所在目录的 `log/`。
+想确认平台默认目录（不读配置）：
+
+    rbackup.sh --print-log-dir
 
 ### 统计文件格式
 
@@ -1081,7 +1095,8 @@ MSYS2 + winpty 会吞掉 ESC。使用 q 或 Ctrl+C。
 
 ### 日志目录不可写？
 
-rbackup.sh 会自动回退到脚本同目录的 log/。
+按 `LOG_DIR` → 平台默认目录 → 脚本同目录 `log/` 的顺序回退。先用
+`rbackup.sh --print-log-dir` 看平台默认目录在哪，再检查权限。
 
 ### 如何只做挂载检查？
 

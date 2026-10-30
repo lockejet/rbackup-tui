@@ -9,8 +9,11 @@ SSH_PORT=22
 SSH_USER=admin
 SSH_KEY=~/.ssh/id_ed25519
 
-# 日志目录（自动生成 ${SCRIPT_NAME}_${DATE}.log）
-LOG_DIR=/var/log
+# 日志目录（可选；不写则跟随平台：
+#   Linux   $XDG_STATE_HOME/rbackup-tui/log（默认 ~/.local/state/…）
+#   Windows %LOCALAPPDATA%\rbackup-tui\Logs）
+#   （自动生成 ${SCRIPT_NAME}_${DATE}.log 与 .stats）
+#LOG_DIR=/var/log/rbackup
 
 # 全局 rsync 默认选项（可被任务级 opts 追加覆盖）
 #GLOBAL_OPTS=-avzhu --progress

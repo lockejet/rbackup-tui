@@ -55,6 +55,7 @@ jobs:
           test -x "$dir/rbackup-tui"
           test -x "$dir/rbackup.sh"
           test -f "$dir/config1.ini.example"
+          "$dir/rbackup.sh" --help >/dev/null
           echo "冒烟测试通过：$dir"
 
       - name: 校验和复核
