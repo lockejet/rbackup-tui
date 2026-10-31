@@ -3,16 +3,19 @@
 > **本文档里的命令请你自己执行。** 它们包含 `filter-repo` 重写历史与 `push --force`，
 > 都是不可逆操作，不适合由自动化代劳。
 >
+> **已于 2026-10-31 执行过一次**（过程、校验与残留项见文末「执行记录」）。
+> 下述步骤保留作参考；如需再次执行，请先按第 1 步做镜像备份。
+>
 > **本文件不写真实值。** 文中出现的地址一律使用 RFC 5737 文档保留网段
 > （`192.0.2.0/24`、`198.51.100.0/24`、`203.0.113.0/24`），主机名一律用
 > `example.com`，用户名一律用 `<user>`。
 
-## 一句话现状（2026-10-30 实测）
+## 一句话现状（2026-10-31 更新）
 
 | 项目 | 结论 |
 |---|---|
 | 仓库可见性 | **public**（`gh repo view` / GitHub API 均为 `private: false`） |
-| 历史是否已重写 | **否**。历史里仍能取到内网地址与本机密钥路径，且 `origin/main` 与本地一致 |
+| 历史是否已重写 | **是**（2026-10-31）。新历史扫描零命中；旧提交/旧 tag 对象在 GitHub 上仍可按已知 SHA 访问，待 Support 清除或重建仓库，见文末 |
 | 当前工作树 | 干净；真实配置（`config-*.ini`）、真实日志、私有脚本**从未进过本仓库历史** |
 | 本文档自身 | 旧版本在 HEAD 里写有真实内网地址与用户名，已于 2026-10-30 脱敏 |
 
@@ -183,3 +186,57 @@ git push --mirror git@github.com:lockejet/rbackup-tui.git
    这是预期结果；不要试图保留原始明文。
 4. **与代码无关的东西不要动**：真实配置与日志本就在 `.gitignore` 里，
    且从未入库，清理时无需处理（也不要把它们提交进去）。
+
+---
+
+## 执行记录（2026-10-31）
+
+### 做了什么
+
+1. **备份**（均在仓库外）：
+   - 远端全量镜像：`~/rbackup-tui-mirror-backup-YYYY-MM-DD.git`（31 个提交、11 个 tag）
+   - 九个 Release 的资产：`~/rbackup-release-backup/`（v1.1.1–v1.1.9，约 75 MB）
+   - 清理前的 refs 指纹：`~/rbackup-refs-before.txt`
+2. **在独立副本上重写**（原仓库保持不动，校验通过后才推送）：
+   - pass 1：`git filter-repo --force --invert-paths --path rbackup-tui`
+     （移除历史中 4.93 MB 的二进制）
+   - pass 2：`git filter-repo --force --replace-text ~/rbackup-redact-text.txt`
+     - `regex:192\.168\.\d+\.\d+(:\d+)?` → `192.0.2.10`
+     - `regex:/home/[A-Za-z0-9_.-]+/\.ssh/[A-Za-z0-9_.-]+` → `~/.ssh/id_ed25519`
+     - `regex:/home/<user>` → `~`
+   - 结果：32 → **31 个提交**（一个"仅删除二进制"的空提交被裁剪）、**11 个 tag** 全部重写；
+     HEAD 的 tree 哈希与重写前完全一致，即只改历史、未改当前内容
+3. **推送**：`git push --force origin main` → 再 `git push --force origin --tags`
+   （先分支后 tag）。推送后 CI 在重写后的 main 上通过。
+4. **校验**（匿名全新 clone）：
+   - `git log --all -p | grep -E '192\.168\.|/home/[^/ ]+/\.ssh/|/home/<user>'` → 零命中
+   - 历史文件清单无 `rbackup-tui`；tag 11 个；HEAD tree 与重写前一致
+   - 线上 Release 资产未被重建（强推 tag 不触发 push 工作流），下载校验和仍全部通过
+5. **旧 Release 资产修复**（2026-10-31 晚）：
+   - 发现 v1.1.2–v1.1.5 的 12 个资产内 `README.md` / `config2.ini.example` 含
+     `/home/<user>/.ssh/...` 示例，且二进制带本机构建路径（`/home/<user>/go/pkg/mod/...`）
+   - 用重写后的对应 tag 重新构建（`-trimpath` 去除构建路径）并覆盖上传：
+     `~/rebuild-old-releases.sh` + `~/upload-old-releases.sh`（`gh release upload --clobber`）
+   - 复核：12 个资产的文件清单与原包一致、版本标记正确、`/home/<user>` 与内网地址零命中；
+     原始资产仍留底于 `~/rbackup-release-backup/`
+
+### 仍待处理（需要仓库管理员 / GitHub Support）
+
+1. **旧对象仍可按 SHA 访问**（GitHub 行为：force-push ≠ 删除）：
+   - 31 个旧提交、11 个旧 tag 对象、15 个含敏感串的 blob（含那个 4.93 MB 二进制）
+   - 实测 `git fetch origin <旧SHA>`、`raw.githubusercontent.com`、`/commit/<旧SHA>` 均返回 200
+   - 处理方式二选一：
+     - **a.** 向 GitHub Support 提交清除请求（草稿：`~/rbackup-purge-request.md`，含完整 SHA 清单与复现命令）；
+     - **b.** 删除并重建仓库（Release 资产已备份，需重新上传；本仓库 forks/stars 均为 0，代价小）。
+2. ~~旧 Release 资产残留~~ **已处理**：v1.1.2–v1.1.5 的 12 个资产已用重写后的 tag
+   重新构建并覆盖上传，线上复核无本机路径/内网地址；原始资产留底在
+   `~/rbackup-release-backup/`。若需回退或改用删除方案，`~/rbackup-release-fix.sh` 里
+   有 `--delete` / `--replace` 两种模式的现成命令。
+3. **发布二进制里的 GitCommit**：v1.1.6–v1.1.9 的 Release 资产是重写前构建的，
+   内嵌的是旧 SHA，与现历史对不上；属正常现象，下一个版本会使用新 SHA。
+
+### 备注
+
+- 强推 tag **不会**触发 `Release` 工作流（本次实测：四个带 `release.yml` 的 tag
+  强推后没有产生新的 run），因此历史 Release 资产保持原样。
+- 旧 tag 强推后，所有人的本地副本都需要 `git fetch --force --tags` 或重新 clone。
