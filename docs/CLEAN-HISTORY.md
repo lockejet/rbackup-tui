@@ -219,21 +219,30 @@ git push --mirror git@github.com:lockejet/rbackup-tui.git
      `~/rebuild-old-releases.sh` + `~/upload-old-releases.sh`（`gh release upload --clobber`）
    - 复核：12 个资产的文件清单与原包一致、版本标记正确、`/home/<user>` 与内网地址零命中；
      原始资产仍留底于 `~/rbackup-release-backup/`
+   - 随后把 v1.1.6–v1.1.9 也重建，使二进制内嵌的 GitCommit 指向新历史：
+     - v1.1.9 走 CI（`gh workflow run release.yml -f tag=v1.1.9`，39s 成功，SHA256SUMS 由 CI 重生成）
+     - v1.1.6–v1.1.8 的 tag 里 `rbackup.sh --help` 仍有旧 bug，CI 冒烟会失败，
+       改用本地 `-trimpath` 构建 + 重算 `SHA256SUMS`（保留原 install.sh 行）后覆盖上传，
+       脚本 `~/rebuild-1678.sh`；线上复核校验和通过、内嵌 commit 为新 SHA
+   - 至此 **9 个 Release 的资产均构建自重写后的历史**
 
 ### 仍待处理（需要仓库管理员 / GitHub Support）
 
 1. **旧对象仍可按 SHA 访问**（GitHub 行为：force-push ≠ 删除）：
-   - 31 个旧提交、11 个旧 tag 对象、15 个含敏感串的 blob（含那个 4.93 MB 二进制）
+   - 31 个旧提交、11 个旧 tag 对象、18 个含敏感串的 blob（含那个 4.93 MB 二进制）
    - 实测 `git fetch origin <旧SHA>`、`raw.githubusercontent.com`、`/commit/<旧SHA>` 均返回 200
    - 处理方式二选一：
-     - **a.** 向 GitHub Support 提交清除请求（草稿：`~/rbackup-purge-request.md`，含完整 SHA 清单与复现命令）；
-     - **b.** 删除并重建仓库（Release 资产已备份，需重新上传；本仓库 forks/stars 均为 0，代价小）。
+     - **a.** 向 GitHub Support 提交清除请求：可直接粘贴的英文工单在
+       `~/rbackup-support-ticket.md`（含完整 SHA 清单、实测证据与请求事项）；
+     - **b.** 删除并重建仓库（Release 资产已备份、元数据已导出，步骤见
+       `~/rbackup-recreate-plan.md`；本仓库 forks/stars 均为 0，代价小）。
 2. ~~旧 Release 资产残留~~ **已处理**：v1.1.2–v1.1.5 的 12 个资产已用重写后的 tag
    重新构建并覆盖上传，线上复核无本机路径/内网地址；原始资产留底在
    `~/rbackup-release-backup/`。若需回退或改用删除方案，`~/rbackup-release-fix.sh` 里
    有 `--delete` / `--replace` 两种模式的现成命令。
-3. **发布二进制里的 GitCommit**：v1.1.6–v1.1.9 的 Release 资产是重写前构建的，
-   内嵌的是旧 SHA，与现历史对不上；属正常现象，下一个版本会使用新 SHA。
+3. ~~发布二进制里的 GitCommit~~ **已处理**（2026-10-31 晚）：v1.1.6–v1.1.9 的资产已重建，
+   内嵌 GitCommit 均指向重写后的新 SHA；9 个 Release 的资产现在全部构建自新历史。
+   重建前的原始资产仍留底于 `~/rbackup-release-backup/`。
 
 ### 备注
 
