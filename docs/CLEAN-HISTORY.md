@@ -265,10 +265,10 @@ git push --mirror git@github.com:lockejet/rbackup-tui.git
 
 ### 备份清理（2026-11-01）
 
-方案 B 完成并复核后，已删除全部本地备份（约 154MB）：旧镜像、重建前后资产副本、
-/tmp 工作副本。文中 `~/rbackup-cleanup-2026-10-31/backups/...` 路径仅作历史记录，
-**现已不存在**；当前唯一事实源是 GitHub（35 提交、11 tag、9 个 Release），
-如需重新打包旧版本可用同目录 `scripts/` 下的脚本从 tag 重建。
+方案 B 完成并复核后，已删除全部本地备份（约 154MB），随后把整个工作目录
+`~/rbackup-cleanup-2026-10-31/` 也删除了（2026-11-01）。文中的 `~/rbackup-cleanup-2026-10-31/...`
+路径仅作历史记录，**现已不存在**；当前唯一事实源是 GitHub（11 个 tag、9 个 Release），
+如需重新打包旧版本可按本文档的 `filter-repo`/打包步骤从 tag 重建。
 
 ### 备注
 
