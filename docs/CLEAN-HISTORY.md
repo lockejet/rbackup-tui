@@ -15,7 +15,8 @@
 | 项目 | 结论 |
 |---|---|
 | 仓库可见性 | **public**（`gh repo view` / GitHub API 均为 `private: false`） |
-| 历史是否已重写 | **是**（2026-10-31）。新历史扫描零命中；旧提交/旧 tag 对象在 GitHub 上仍可按已知 SHA 访问，待 Support 清除或重建仓库，见文末 |
+| 历史是否已重写 | **是**（2026-10-31）。新历史扫描零命中 |
+| 旧对象是否已清除 | **是**（2026-11-01，方案 B：删除并重建仓库）。旧 SHA 的 raw/API/页面均 404，`git fetch <旧SHA>` 报 `not our ref` |
 | 当前工作树 | 干净；真实配置（`config-*.ini`）、真实日志、私有脚本**从未进过本仓库历史** |
 | 本文档自身 | 旧版本在 HEAD 里写有真实内网地址与用户名，已于 2026-10-30 脱敏 |
 
@@ -226,16 +227,9 @@ git push --mirror git@github.com:lockejet/rbackup-tui.git
        脚本 `~/rbackup-cleanup-2026-10-31/scripts/rebuild-1678.sh`；线上复核校验和通过、内嵌 commit 为新 SHA
    - 至此 **9 个 Release 的资产均构建自重写后的历史**
 
-### 仍待处理（需要仓库管理员 / GitHub Support）
+### 仍待处理
 
-1. **旧对象仍可按 SHA 访问**（GitHub 行为：force-push ≠ 删除）：
-   - 31 个旧提交、11 个旧 tag 对象、18 个含敏感串的 blob（含那个 4.93 MB 二进制）
-   - 实测 `git fetch origin <旧SHA>`、`raw.githubusercontent.com`、`/commit/<旧SHA>` 均返回 200
-   - 处理方式二选一：
-     - **a.** 向 GitHub Support 提交清除请求：可直接粘贴的英文工单在
-       `~/rbackup-cleanup-2026-10-31/reports/support-ticket.md`（含完整 SHA 清单、实测证据与请求事项）；
-     - **b.** 删除并重建仓库（Release 资产已备份、元数据已导出，步骤见
-       `~/rbackup-cleanup-2026-10-31/reports/recreate-plan.md`；本仓库 forks/stars 均为 0，代价小）。
+无。（2026-11-01 已用方案 B 删除并重建仓库，旧对象彻底不可达；见下节执行记录。）
 2. ~~旧 Release 资产残留~~ **已处理**：v1.1.2–v1.1.5 的 12 个资产已用重写后的 tag
    重新构建并覆盖上传，线上复核无本机路径/内网地址；原始资产留底在
    `~/rbackup-cleanup-2026-10-31/backups/rbackup-release-backup/`。若需回退或改用删除方案，`~/rbackup-cleanup-2026-10-31/scripts/rbackup-release-fix.sh` 里
@@ -244,8 +238,35 @@ git push --mirror git@github.com:lockejet/rbackup-tui.git
    内嵌 GitCommit 均指向重写后的新 SHA；9 个 Release 的资产现在全部构建自新历史。
    重建前的原始资产仍留底于 `~/rbackup-cleanup-2026-10-31/backups/rbackup-release-backup/`。
 
+### 方案 B 执行记录（2026-11-01）
+
+前置：`gh auth refresh -h github.com -s delete_repo` 补权限；`backups/restore-assets/`
+里已备好 9 个 Release 的**重建后干净资产**（逐个校验过）。
+
+1. 删除仓库 → 同名重建为 public、空仓库（`gh repo delete` + `gh repo create`）
+2. 临时关闭 Actions → 推 `main` 与 11 个 tag → 重新打开 Actions
+   （关闭是为了避免推 tag 时触发 4 个 Release 重建；Actions 历史随之清零，属预期代价）
+3. 用 `backups/restore-assets/` 恢复 9 个 Release（标题/正文取自
+   `metadata/release-metadata.json`，按版本升序创建，最后 v1.1.9 自动为 Latest）
+4. 恢复仓库设置：description、`has_issues=true`、`has_projects=true`、`has_wiki=false`
+
+复验结果：
+
+| 检查 | 结果 |
+|---|---|
+| 旧提交 raw / API / 页面 | 404 / 422 / 404 |
+| `git fetch origin <旧SHA>` | `not our ref`（exit 128） |
+| 全新 clone 历史扫描 | 零命中，34 提交、11 tag |
+| 9 个 Release | 资产齐全；v1.1.6–v1.1.9 的 `SHA256SUMS` 校验通过 |
+| `releases/latest/download/install.sh` | 200 |
+| 仓库设置 | 与重建前一致（stars/forks/issues 均为 0，无损失） |
+
+已知代价：Release 的原始创建时间、Actions 历史、仓库创建时间被重置（内容与资产不受影响）。
+
 ### 备注
 
 - 强推 tag **不会**触发 `Release` 工作流（本次实测：四个带 `release.yml` 的 tag
   强推后没有产生新的 run），因此历史 Release 资产保持原样。
 - 旧 tag 强推后，所有人的本地副本都需要 `git fetch --force --tags` 或重新 clone。
+- 2026-11-01 重建仓库后，本地仓库的 `origin` 已指向同名新仓库，`git pull/fetch` 正常；
+  原旧对象只保留在本地镜像备份 `backups/rbackup-tui-mirror-backup-2026-10-31.git` 中。
