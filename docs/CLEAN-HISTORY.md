@@ -263,6 +263,13 @@ git push --mirror git@github.com:lockejet/rbackup-tui.git
 
 已知代价：Release 的原始创建时间、Actions 历史、仓库创建时间被重置（内容与资产不受影响）。
 
+### 备份清理（2026-11-01）
+
+方案 B 完成并复核后，已删除全部本地备份（约 154MB）：旧镜像、重建前后资产副本、
+/tmp 工作副本。文中 `~/rbackup-cleanup-2026-10-31/backups/...` 路径仅作历史记录，
+**现已不存在**；当前唯一事实源是 GitHub（35 提交、11 tag、9 个 Release），
+如需重新打包旧版本可用同目录 `scripts/` 下的脚本从 tag 重建。
+
 ### 备注
 
 - 强推 tag **不会**触发 `Release` 工作流（本次实测：四个带 `release.yml` 的 tag
