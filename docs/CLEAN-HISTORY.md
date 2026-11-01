@@ -96,12 +96,12 @@ git filter-repo --force --invert-paths --path rbackup-tui
 ### 2.2 再替换文件内容里的敏感字符串
 
 ```bash
-cat > ~/rbackup-redact.txt <<'EOF'
+cat > ~/rbackup-cleanup-2026-10-31/metadata/redact-text.txt <<'EOF'
 regex:192\.168\.[0-9]{1,3}\.[0-9]{1,3}(:[0-9]+)?==>192.0.2.10
 regex:/home/[^/ \n]+/\.ssh/[A-Za-z0-9_.-]+==>~/.ssh/id_ed25519
 EOF
 
-git filter-repo --force --replace-text ~/rbackup-redact.txt
+git filter-repo --force --replace-text ~/rbackup-cleanup-2026-10-31/metadata/redact-text.txt
 ```
 
 说明：
@@ -173,7 +173,7 @@ done
 用第 1 步的镜像恢复远端：
 
 ```bash
-cd ~/rbackup-tui-backup-*.git
+cd ~/rbackup-cleanup-2026-10-31/backups/rbackup-tui-mirror-backup-*.git
 git push --mirror git@github.com:lockejet/rbackup-tui.git
 ```
 
@@ -194,13 +194,13 @@ git push --mirror git@github.com:lockejet/rbackup-tui.git
 ### 做了什么
 
 1. **备份**（均在仓库外）：
-   - 远端全量镜像：`~/rbackup-tui-mirror-backup-YYYY-MM-DD.git`（31 个提交、11 个 tag）
-   - 九个 Release 的资产：`~/rbackup-release-backup/`（v1.1.1–v1.1.9，约 75 MB）
-   - 清理前的 refs 指纹：`~/rbackup-refs-before.txt`
+   - 远端全量镜像：`~/rbackup-cleanup-2026-10-31/backups/rbackup-tui-mirror-backup-YYYY-MM-DD.git`（31 个提交、11 个 tag）
+   - 九个 Release 的资产：`~/rbackup-cleanup-2026-10-31/backups/rbackup-release-backup/`（v1.1.1–v1.1.9，约 75 MB）
+   - 清理前的 refs 指纹：`~/rbackup-cleanup-2026-10-31/metadata/refs-before.txt`
 2. **在独立副本上重写**（原仓库保持不动，校验通过后才推送）：
    - pass 1：`git filter-repo --force --invert-paths --path rbackup-tui`
      （移除历史中 4.93 MB 的二进制）
-   - pass 2：`git filter-repo --force --replace-text ~/rbackup-redact-text.txt`
+   - pass 2：`git filter-repo --force --replace-text ~/rbackup-cleanup-2026-10-31/metadata/redact-text.txt`
      - `regex:192\.168\.\d+\.\d+(:\d+)?` → `192.0.2.10`
      - `regex:/home/[A-Za-z0-9_.-]+/\.ssh/[A-Za-z0-9_.-]+` → `~/.ssh/id_ed25519`
      - `regex:/home/<user>` → `~`
@@ -216,14 +216,14 @@ git push --mirror git@github.com:lockejet/rbackup-tui.git
    - 发现 v1.1.2–v1.1.5 的 12 个资产内 `README.md` / `config2.ini.example` 含
      `/home/<user>/.ssh/...` 示例，且二进制带本机构建路径（`/home/<user>/go/pkg/mod/...`）
    - 用重写后的对应 tag 重新构建（`-trimpath` 去除构建路径）并覆盖上传：
-     `~/rebuild-old-releases.sh` + `~/upload-old-releases.sh`（`gh release upload --clobber`）
+     `~/rbackup-cleanup-2026-10-31/scripts/rebuild-old-releases.sh` + `~/rbackup-cleanup-2026-10-31/scripts/upload-old-releases.sh`（`gh release upload --clobber`）
    - 复核：12 个资产的文件清单与原包一致、版本标记正确、`/home/<user>` 与内网地址零命中；
-     原始资产仍留底于 `~/rbackup-release-backup/`
+     原始资产仍留底于 `~/rbackup-cleanup-2026-10-31/backups/rbackup-release-backup/`
    - 随后把 v1.1.6–v1.1.9 也重建，使二进制内嵌的 GitCommit 指向新历史：
      - v1.1.9 走 CI（`gh workflow run release.yml -f tag=v1.1.9`，39s 成功，SHA256SUMS 由 CI 重生成）
      - v1.1.6–v1.1.8 的 tag 里 `rbackup.sh --help` 仍有旧 bug，CI 冒烟会失败，
        改用本地 `-trimpath` 构建 + 重算 `SHA256SUMS`（保留原 install.sh 行）后覆盖上传，
-       脚本 `~/rebuild-1678.sh`；线上复核校验和通过、内嵌 commit 为新 SHA
+       脚本 `~/rbackup-cleanup-2026-10-31/scripts/rebuild-1678.sh`；线上复核校验和通过、内嵌 commit 为新 SHA
    - 至此 **9 个 Release 的资产均构建自重写后的历史**
 
 ### 仍待处理（需要仓库管理员 / GitHub Support）
@@ -233,16 +233,16 @@ git push --mirror git@github.com:lockejet/rbackup-tui.git
    - 实测 `git fetch origin <旧SHA>`、`raw.githubusercontent.com`、`/commit/<旧SHA>` 均返回 200
    - 处理方式二选一：
      - **a.** 向 GitHub Support 提交清除请求：可直接粘贴的英文工单在
-       `~/rbackup-support-ticket.md`（含完整 SHA 清单、实测证据与请求事项）；
+       `~/rbackup-cleanup-2026-10-31/reports/support-ticket.md`（含完整 SHA 清单、实测证据与请求事项）；
      - **b.** 删除并重建仓库（Release 资产已备份、元数据已导出，步骤见
-       `~/rbackup-recreate-plan.md`；本仓库 forks/stars 均为 0，代价小）。
+       `~/rbackup-cleanup-2026-10-31/reports/recreate-plan.md`；本仓库 forks/stars 均为 0，代价小）。
 2. ~~旧 Release 资产残留~~ **已处理**：v1.1.2–v1.1.5 的 12 个资产已用重写后的 tag
    重新构建并覆盖上传，线上复核无本机路径/内网地址；原始资产留底在
-   `~/rbackup-release-backup/`。若需回退或改用删除方案，`~/rbackup-release-fix.sh` 里
+   `~/rbackup-cleanup-2026-10-31/backups/rbackup-release-backup/`。若需回退或改用删除方案，`~/rbackup-cleanup-2026-10-31/scripts/rbackup-release-fix.sh` 里
    有 `--delete` / `--replace` 两种模式的现成命令。
 3. ~~发布二进制里的 GitCommit~~ **已处理**（2026-10-31 晚）：v1.1.6–v1.1.9 的资产已重建，
    内嵌 GitCommit 均指向重写后的新 SHA；9 个 Release 的资产现在全部构建自新历史。
-   重建前的原始资产仍留底于 `~/rbackup-release-backup/`。
+   重建前的原始资产仍留底于 `~/rbackup-cleanup-2026-10-31/backups/rbackup-release-backup/`。
 
 ### 备注
 
