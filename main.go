@@ -380,6 +380,15 @@ Web 选项:
   --web-max-clients <n>         SSE 客户端上限（默认 8）
   --web-read-only               只读模式：禁止触发任务，只观察
 
+登录/二次验证（可选）:
+  --web-user <名称>             用户名（配合密码登录，默认 admin）
+  --web-password-hash <哈希>    密码哈希（不推荐直接写在命令行）
+  --web-password-hash-file <f>  密码哈希文件（推荐；先跑 --web-hash-password 生成）
+  --web-2fa <off|totp>          二次验证模式（默认 off；totp 需配合密码登录）
+  --web-totp-secret-file <f>    TOTP secret 文件（先跑 --web-gen-totp 生成）
+  --web-hash-password           交互式生成密码哈希后退出
+  --web-gen-totp                生成 TOTP secret 与 otpauth URI 后退出
+
 环境变量: RBACKUP_WEB_TOKEN / RBACKUP_WEB_TOKEN_FILE / RBACKUP_WEB_ADDR
 安全默认: 监听非 loopback 地址必须 token + TLS，否则拒绝启动；
           仅当显式 --web-insecure-http 时才允许明文（内网/VPN 场景）。
@@ -400,6 +409,21 @@ func parseCLI(args []string) (configPath, scriptPath string, err error) {
 	}
 	if v := os.Getenv("RBACKUP_WEB_ADDR"); v != "" {
 		webOpts.Addr = v
+	}
+	if v := os.Getenv("RBACKUP_WEB_USER"); v != "" {
+		webOpts.User = v
+	}
+	if v := os.Getenv("RBACKUP_WEB_PASSWORD_HASH"); v != "" {
+		webOpts.PasswordHash = v
+	}
+	if v := os.Getenv("RBACKUP_WEB_PASSWORD_HASH_FILE"); v != "" {
+		webOpts.PasswordHashFile = v
+	}
+	if v := os.Getenv("RBACKUP_WEB_2FA"); v != "" {
+		webOpts.TwoFA = v
+	}
+	if v := os.Getenv("RBACKUP_WEB_TOTP_SECRET_FILE"); v != "" {
+		webOpts.TOTPSecretFile = v
 	}
 
 	for i := 1; i < len(args); i++ {
@@ -462,6 +486,40 @@ func parseCLI(args []string) (configPath, scriptPath string, err error) {
 		case "--web-read-only":
 			webMode = true
 			webOpts.ReadOnly = true
+		case "--web-user":
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
+			}
+			webMode = true
+			webOpts.User = v
+		case "--web-password-hash":
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
+			}
+			webMode = true
+			webOpts.PasswordHash = v
+		case "--web-password-hash-file":
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
+			}
+			webMode = true
+			webOpts.PasswordHashFile = v
+		case "--web-2fa":
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
+			}
+			webMode = true
+			webOpts.TwoFA = v
+		case "--web-totp-secret-file":
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
+			}
+			webMode = true
+			webOpts.TOTPSecretFile = v
+		case "--web-hash-password":
+			os.Exit(runHashPasswordCLI())
+		case "--web-gen-totp":
+			os.Exit(runGenTOTPCLI(webOpts.User))
 		case "--web-max-clients":
 			if v, err = argValue(args, &i, args[i]); err != nil {
 				return "", "", err

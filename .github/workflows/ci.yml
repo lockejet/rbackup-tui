@@ -30,6 +30,9 @@ jobs:
       - name: 构建当前平台
         run: go build -ldflags "-X main.Version=ci" -o /tmp/rbackup-tui .
 
+      - name: 前端 JS 语法检查
+        run: node --check web/app.js
+
       - name: 三平台交叉编译
         run: |
           set -euo pipefail
@@ -45,7 +48,7 @@ jobs:
       - name: gofmt 提示（不阻塞）
         continue-on-error: true
         run: |
-          mapfile -t files < <(gofmt -l main.go config.go runner.go main_test.go web.go web_test.go proc_unix.go proc_windows.go)
+          mapfile -t files < <(gofmt -l main.go config.go runner.go main_test.go web.go webauth.go web_test.go proc_unix.go proc_windows.go)
           if [ "${#files[@]}" -gt 0 ]; then
             echo "::warning::以下文件未通过 gofmt: ${files[*]}"
             gofmt -d "${files[@]}" | head -60

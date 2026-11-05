@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light;
   --bg: #f4f5f7;
   --card: #ffffff;
   --text: #1f2328;
@@ -13,10 +14,30 @@
   --log-text: #d6deeb;
   --log-dim: #64748b;
   --badge-bg: #eef2ff;
+  --shadow: 0 12px 32px rgba(0, 0, 0, .08);
+}
+
+/* 暗色：显式选择，或自动模式下系统为深色 */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b1118;
+  --card: #111a24;
+  --text: #e6edf3;
+  --muted: #8b98a5;
+  --line: #1f2a37;
+  --primary: #3b82f6;
+  --danger: #ef4444;
+  --warn: #f59e0b;
+  --ok: #22c55e;
+  --log-bg: #070d14;
+  --log-text: #cfd8e3;
+  --badge-bg: #1b2a3d;
+  --shadow: 0 12px 32px rgba(0, 0, 0, .45);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #0b1118;
     --card: #111a24;
     --text: #e6edf3;
@@ -29,6 +50,7 @@
     --log-bg: #070d14;
     --log-text: #cfd8e3;
     --badge-bg: #1b2a3d;
+    --shadow: 0 12px 32px rgba(0, 0, 0, .45);
   }
 }
 
@@ -39,6 +61,7 @@ body {
   font: 14px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   background: var(--bg);
   color: var(--text);
+  -webkit-text-size-adjust: 100%;
 }
 .hidden { display: none !important; }
 .ver { font-size: 12px; color: var(--muted); font-weight: 400; }
@@ -54,12 +77,16 @@ button {
   background: var(--card);
   color: var(--text);
   cursor: pointer;
+  transition: border-color .15s, background .15s, transform .05s;
 }
 button:hover { border-color: var(--muted); }
+button:active { transform: translateY(1px); }
 button:disabled { opacity: .45; cursor: not-allowed; }
 button.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
 button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 button.ghost { background: transparent; }
+button.link { border: none; background: none; color: var(--primary); padding: 0; text-decoration: underline; cursor: pointer; }
+.theme-btn { font-size: 16px; line-height: 1; padding: 6px 9px; }
 
 /* 登录 */
 .login-view { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 24px; }
@@ -70,13 +97,17 @@ button.ghost { background: transparent; }
   border-radius: 14px;
   padding: 28px;
   display: flex; flex-direction: column; gap: 12px;
-  box-shadow: 0 12px 32px rgba(0,0,0,.08);
+  box-shadow: var(--shadow);
 }
-.login-card h1 { margin: 0 0 4px; font-size: 20px; }
+.login-card h1 { margin: 0 0 4px; font-size: 20px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.fields { display: flex; flex-direction: column; gap: 10px; }
 .login-card input {
-  font: inherit; padding: 10px 12px; border-radius: 8px;
+  font: inherit; padding: 11px 12px; border-radius: 8px;
   border: 1px solid var(--line); background: transparent; color: var(--text);
+  width: 100%;
 }
+.login-card input:focus { outline: 2px solid color-mix(in srgb, var(--primary) 45%, transparent); outline-offset: 1px; }
+.totp-input { letter-spacing: .35em; text-align: center; font-size: 20px; }
 
 /* 顶栏 */
 .topbar {
@@ -136,6 +167,9 @@ tr:hover td { background: color-mix(in srgb, var(--primary) 6%, transparent); }
 .c-chk { width: 34px; }
 .c-src, .c-dst { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
 
+/* 手机端任务卡片（桌面隐藏） */
+.task-cards { display: none; }
+
 .badge {
   display: inline-block; padding: 2px 8px; border-radius: 999px;
   font-size: 12px; background: var(--badge-bg); color: var(--muted);
@@ -163,7 +197,7 @@ tr:hover td { background: color-mix(in srgb, var(--primary) 6%, transparent); }
 
 /* 弹窗 */
 .modal {
-  position: fixed; inset: 0; background: rgba(0,0,0,.5);
+  position: fixed; inset: 0; background: rgba(0, 0, 0, .5);
   display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 20;
 }
 .modal-card {
@@ -175,20 +209,60 @@ tr:hover td { background: color-mix(in srgb, var(--primary) 6%, transparent); }
 .modal-list { margin: 8px 0; padding-left: 20px; }
 .modal-list li { margin: 2px 0; }
 
-/* 窄屏 */
+/* ---------- 平板 / 手机 ---------- */
 @media (max-width: 960px) {
   .layout {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(220px, 40vh) minmax(220px, 1fr);
+    grid-template-rows: minmax(240px, 42vh) minmax(240px, 1fr);
     height: auto;
   }
   .c-src, .c-dst { display: none; }
   .meta { flex-basis: 100%; }
 }
-@media (max-width: 560px) {
-  .c-gate, .c-danger { display: none; }
+
+@media (max-width: 720px) {
+  body { padding-bottom: calc(78px + env(safe-area-inset-bottom)); }
+  .table-wrap { display: none; }
+  .task-cards {
+    display: flex; flex-direction: column; gap: 8px;
+    padding: 10px; overflow: auto; min-height: 0;
+  }
+  .task-card {
+    display: flex; align-items: flex-start; gap: 10px;
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 12px; background: var(--card); cursor: pointer;
+    min-height: 56px;
+  }
+  .task-card input[type=checkbox] { width: 20px; height: 20px; margin-top: 2px; flex: none; }
+  .tc-main { min-width: 0; flex: 1; }
+  .tc-name { font-weight: 600; }
+  .tc-line { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+
+  /* 任务操作栏固定在底部，便于拇指操作 */
+  .tasks .card-head .toolbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    margin: 0; padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+    background: var(--card);
+    border-top: 1px solid var(--line);
+    justify-content: space-between;
+    box-shadow: 0 -6px 18px rgba(0, 0, 0, .12);
+  }
+  .tasks .card-head .toolbar button { min-height: 44px; flex: 1; }
+  .tasks .card-head { padding: 8px 10px; }
+  .card-head h2 { font-size: 13px; }
+  .chk { font-size: 13px; }
   .topbar { padding: 10px 12px; }
   .layout { padding: 0 10px 10px; }
-  .card-head { padding: 8px 10px; }
-  .toolbar { width: 100%; margin-left: 0; }
+  .info { padding: 8px 12px; gap: 6px 14px; }
+  .stats { padding: 8px 12px 12px; }
+  .log-body { font-size: 11px; }
+  .login-card { padding: 22px 18px; }
+  .login-card input { padding: 12px; font-size: 16px; } /* 防止 iOS 聚焦缩放 */
+  .login-card button[type=submit] { min-height: 46px; }
+}
+
+@media (max-width: 420px) {
+  .c-gate, .c-danger { display: none; }
+  .actions { gap: 6px; }
 }

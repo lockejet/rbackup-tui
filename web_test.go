@@ -512,3 +512,221 @@ func TestParseCLIWebFlags(t *testing.T) {
 		t.Fatalf("普通参数不应启用 web: err=%v mode=%v", err, webMode)
 	}
 }
+
+// ---------- A+B+C：密码登录 / TOTP / 认证信息 ----------
+
+func TestPasswordHash(t *testing.T) {
+	h, err := hashPassword("secret123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validPasswordHash(h) {
+		t.Fatalf("哈希格式应合法: %s", h)
+	}
+	if !verifyPassword(h, "secret123") {
+		t.Fatal("正确密码应通过")
+	}
+	if verifyPassword(h, "wrong") {
+		t.Fatal("错误密码不应通过")
+	}
+	if verifyPassword("bad-format", "x") || validPasswordHash("bad-format") {
+		t.Fatal("非法哈希格式应拒绝")
+	}
+}
+
+func TestTOTPCode(t *testing.T) {
+	secret, err := decodeTOTPSecret("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// RFC 6238 测试向量（SHA1 密钥 "12345678901234567890"，T=59 → 8 位 94287082）
+	if got := totpCode(secret, time.Unix(59, 0)); got != "287082" {
+		t.Fatalf("TOTP 计算错误: got %s want 287082", got)
+	}
+	if _, ok := verifyTOTP(secret, "000000"); ok {
+		t.Fatal("错误动态码不应通过")
+	}
+	if _, ok := verifyTOTP(secret, totpCode(secret, time.Now())); !ok {
+		t.Fatal("当前动态码应通过")
+	}
+}
+
+func newTestEnvAuth(t *testing.T, o webOptions) *testEnv {
+	t.Helper()
+	script, config, dir := writeTestFixture(t)
+	o.AuditLog = filepath.Join(dir, "audit.log")
+	s, err := newWebServer(o, script, config)
+	if err != nil {
+		t.Fatalf("newWebServer: %v", err)
+	}
+	ts := httptest.NewServer(s.handler)
+	t.Cleanup(func() { ts.Close(); s.close() })
+	jar, _ := cookiejar.New(nil)
+	return &testEnv{srv: s, ts: ts, client: &http.Client{Jar: jar, Timeout: 10 * time.Second}}
+}
+
+func (e *testEnv) postSession(t *testing.T, body any) (int, sessionResp) {
+	t.Helper()
+	code, data := e.do(t, http.MethodPost, "/api/session", body, "")
+	var r sessionResp
+	_ = json.Unmarshal(data, &r)
+	return code, r
+}
+
+func TestWebAuthInfo(t *testing.T) {
+	env := newTestEnv(t, nil)
+	code, data := env.do(t, http.MethodGet, "/api/authinfo", nil, "")
+	if code != http.StatusOK {
+		t.Fatalf("authinfo: %d", code)
+	}
+	var info authInfoResp
+	if err := json.Unmarshal(data, &info); err != nil {
+		t.Fatal(err)
+	}
+	if len(info.Methods) != 1 || info.Methods[0] != "token" {
+		t.Fatalf("方法应为 [token]: %v", info.Methods)
+	}
+	if info.TOTP {
+		t.Fatal("默认不应启用 TOTP")
+	}
+}
+
+func TestWebPasswordLogin(t *testing.T) {
+	hash, err := hashPassword("secret123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := webOptions{Addr: "127.0.0.1:0", User: "alice", PasswordHash: hash, TwoFA: "off",
+		MaxClients: 8, SessionTTL: time.Hour}
+	env := newTestEnvAuth(t, o)
+
+	// 错误密码
+	code, _ := env.postSession(t, map[string]string{"username": "alice", "password": "bad"})
+	if code != http.StatusUnauthorized {
+		t.Fatalf("错误密码应 401，got %d", code)
+	}
+	// 错误用户名
+	code, _ = env.postSession(t, map[string]string{"username": "bob", "password": "secret123"})
+	if code != http.StatusUnauthorized {
+		t.Fatalf("错误用户名应 401，got %d", code)
+	}
+	// 正确
+	code, r := env.postSession(t, map[string]string{"username": "alice", "password": "secret123"})
+	if code != http.StatusOK || r.CSRF == "" || r.TotpRequired {
+		t.Fatalf("正确密码应登录成功: code=%d resp=%+v", code, r)
+	}
+	if code, _ := env.do(t, http.MethodGet, "/api/state", nil, ""); code != http.StatusOK {
+		t.Fatalf("登录后 state 应 200，got %d", code)
+	}
+	// authinfo 应显示 password
+	_, data := env.do(t, http.MethodGet, "/api/authinfo", nil, "")
+	var info authInfoResp
+	_ = json.Unmarshal(data, &info)
+	found := false
+	for _, m := range info.Methods {
+		if m == "password" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("authinfo 应包含 password: %v", info.Methods)
+	}
+}
+
+func TestWebTOTPFlow(t *testing.T) {
+	hash, err := hashPassword("secret123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretStr, err := newTOTPSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	secretFile := filepath.Join(dir, "totp.secret")
+	if err := os.WriteFile(secretFile, []byte(secretStr), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := webOptions{Addr: "127.0.0.1:0", User: "alice", PasswordHash: hash,
+		TwoFA: "totp", TOTPSecretFile: secretFile, MaxClients: 8, SessionTTL: time.Hour}
+	env := newTestEnvAuth(t, o)
+
+	secret, err := decodeTOTPSecret(secretStr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 密码正确 → 返回 totpRequired，且此时还没有会话
+	code, r := env.postSession(t, map[string]string{"username": "alice", "password": "secret123"})
+	if code != http.StatusOK || !r.TotpRequired || r.CSRF != "" {
+		t.Fatalf("应先要求 2FA: code=%d resp=%+v", code, r)
+	}
+	if code, _ := env.do(t, http.MethodGet, "/api/state", nil, ""); code != http.StatusUnauthorized {
+		t.Fatalf("2FA 未完成前 state 应 401，got %d", code)
+	}
+
+	// 错误动态码
+	code, _ = env.do(t, http.MethodPost, "/api/session/totp", map[string]string{"code": "000000"}, "")
+	if code != http.StatusUnauthorized {
+		t.Fatalf("错误动态码应 401，got %d", code)
+	}
+
+	// 正确动态码
+	code, data := env.do(t, http.MethodPost, "/api/session/totp",
+		map[string]string{"code": totpCode(secret, time.Now())}, "")
+	if code != http.StatusOK {
+		t.Fatalf("正确动态码应 200，got %d %s", code, data)
+	}
+	if code, _ := env.do(t, http.MethodGet, "/api/state", nil, ""); code != http.StatusOK {
+		t.Fatalf("2FA 完成后 state 应 200，got %d", code)
+	}
+}
+
+func TestWebTokenSkipsTOTP(t *testing.T) {
+	hash, err := hashPassword("secret123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretStr, _ := newTOTPSecret()
+	dir := t.TempDir()
+	secretFile := filepath.Join(dir, "totp.secret")
+	_ = os.WriteFile(secretFile, []byte(secretStr), 0o600)
+	o := webOptions{Addr: "127.0.0.1:0", Token: testToken, User: "alice", PasswordHash: hash,
+		TwoFA: "totp", TOTPSecretFile: secretFile, MaxClients: 8, SessionTTL: time.Hour}
+	env := newTestEnvAuth(t, o)
+
+	// token 登录不要求 TOTP（token 作为恢复方式）
+	code, r := env.postSession(t, map[string]string{"token": testToken})
+	if code != http.StatusOK || r.TotpRequired || r.CSRF == "" {
+		t.Fatalf("token 登录应直接成功且不要求 2FA: code=%d resp=%+v", code, r)
+	}
+	if code, _ := env.do(t, http.MethodGet, "/api/state", nil, ""); code != http.StatusOK {
+		t.Fatalf("token 登录后 state 应 200，got %d", code)
+	}
+}
+
+func TestParseCLIAuthFlags(t *testing.T) {
+	oldMode, oldOpts := webMode, webOpts
+	defer func() { webMode, webOpts = oldMode, oldOpts }()
+	webMode = false
+	webOpts = defaultWebOptions()
+
+	if _, _, err := parseCLI([]string{"rbackup-tui",
+		"--web-user", "alice",
+		"--web-password-hash-file", "/tmp/pw",
+		"--web-2fa", "totp",
+		"--web-totp-secret-file", "/tmp/totp"}); err != nil {
+		t.Fatalf("parseCLI: %v", err)
+	}
+	if !webMode || webOpts.User != "alice" || webOpts.PasswordHashFile != "/tmp/pw" ||
+		webOpts.TwoFA != "totp" || webOpts.TOTPSecretFile != "/tmp/totp" {
+		t.Fatalf("认证相关 flag 解析错误: %+v", webOpts)
+	}
+
+	// 缺值必须报错
+	webMode = false
+	webOpts = defaultWebOptions()
+	if _, _, err := parseCLI([]string{"rbackup-tui", "--web-2fa"}); err == nil {
+		t.Fatal("--web-2fa 缺值应报错")
+	}
+}

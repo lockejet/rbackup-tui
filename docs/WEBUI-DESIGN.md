@@ -2,6 +2,9 @@
 
 > 状态：**已实现（2026-11-05）**，随 **v1.1.10** 发布；本文档保留为设计依据与实现说明。
 >
+> 2026-11-05 追加实现：**A 主题切换 + 手机适配**、**B 用户名密码登录**、
+> **C TOTP 二次验证（可选）**，详见文末「15. 实现补充」。
+>
 > 实现文件：`web.go`、`web/{index.html,style.css,app.js}`、`web_test.go`、`proc_{unix,windows}.go`；
 > 入口：`rbackup-tui --web`。
 > 决策依据（2026-11-05）：远程/手机访问 **要**；历史日志浏览 **先不做**；
@@ -540,3 +543,56 @@ rbackup.example.com {
 3. 运行中提交新 job 是直接 409，还是允许"排队一个"？（我建议 MVP 直接 409）
 4. 危险任务是否强制"必须先 dry-run 成功一次"才允许执行？（我建议是）
 5. `--web-insecure-http` 是否需要？（我建议保留但默认关闭，仅内网调试）
+
+---
+
+## 15. 实现补充（2026-11-05）：主题 / 手机 / 密码 / TOTP
+
+### 15.1 主题（A）
+
+- 三态：`auto`（跟随 `prefers-color-scheme`）/ `light` / `dark`；
+- 实现：`html[data-theme]` + CSS 变量，选择存 `localStorage('rbtui-theme')`，
+  页面 head 内联脚本先应用主题避免闪烁；
+- 入口：顶栏与登录页的「🌓」按钮。
+
+### 15.2 手机适配（A）
+
+- ≤720px：任务表格切换为**卡片列表**；操作按钮固定在底部（`env(safe-area-inset-bottom)`）；
+- 触控目标 ≥44px；登录输入框 16px 防 iOS 缩放；日志区独立滚动；
+- ≤960px 双栏变单栏，隐藏源/目标列；≤420px 进一步精简徽标列。
+
+### 15.3 用户名密码登录（B）
+
+- `--web-user`（默认 `admin`）+ `--web-password-hash-file`；
+- 哈希：PBKDF2-HMAC-SHA256，60 万次迭代，随机 16 字节盐，格式
+  `pbkdf2-sha256$<iter>$<saltB64>$<hashB64>`，常数时间比较；
+- 生成：`rbackup-tui --web-hash-password`（无回显交互输入）；
+- 失败计数与登录限速共用（同 IP 10 次/分钟）；
+- token 登录保留，作为忘记密码/认证器时的恢复方式；
+- 非 loopback 下仍要求 TLS（或显式 `--web-insecure-http` + 可信 VPN）。
+
+### 15.4 TOTP 二次验证（C，可选）
+
+- `--web-2fa totp` + `--web-totp-secret-file`，仅对**密码登录**生效；
+- 流程：密码校验通过 → 发 5 分钟有效的 HttpOnly 待验证 Cookie → `POST /api/session/totp`
+  校验 6 位码（±1 窗口）→ 才发正式会话 Cookie；
+- 防重放：已用过的 30s 窗口不能再次使用；待验证会话最多 5 次尝试；
+- `rbackup-tui --web-gen-totp` 生成 secret 与 `otpauth://` URI；
+- **token 登录跳过 TOTP**（token 本身就是强凭据，也作为丢失认证器时的恢复入口）。
+
+### 15.5 新增接口与前端
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/authinfo` | 未认证可读：`{methods:["token","password"],totp:bool,readOnly,version}` |
+| `POST /api/session` | body 支持 `{token}` 或 `{username,password}`；需要 2FA 时返回 `totpRequired:true` |
+| `POST /api/session/totp` | body `{code}`；用待验证 Cookie 完成二次验证 |
+
+前端登录页按 `authinfo` 自动展示 token 或用户名密码表单（两者都有时可切换），
+并支持 2FA 六位码输入步骤。
+
+### 15.6 测试
+
+`web_test.go` 覆盖：密码哈希生成/校验、RFC 6238 测试向量、密码登录成功/失败、
+TOTP 流程（要求 2FA → 未完成 401 → 错误码 401 → 正确码 200）、token 跳过 TOTP、
+CLI 新参数解析、`/api/authinfo`；`web/app.js` 在 CI 里跑 `node --check`。

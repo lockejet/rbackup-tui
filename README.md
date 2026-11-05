@@ -40,6 +40,8 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 - [Web UI（可选）](#web-ui可选)
   - [启动](#启动-1)
   - [参数](#参数)
+  - [登录方式（token / 用户名密码 / TOTP 二次验证）](#登录方式token--用户名密码--totp-二次验证)
+  - [界面主题与手机](#界面主题与手机)
   - [安全默认（fail-closed）](#安全默认fail-closed)
   - [远程/手机访问](#远程手机访问)
   - [页面功能](#页面功能)
@@ -633,9 +635,46 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 | `--web-audit-log` | 审计日志文件，默认 `<日志目录>/web-audit.log`；`-` 只写 stderr |
 | `--web-max-clients` | SSE 客户端上限，默认 8 |
 | `--web-read-only` | 只读模式：只观察，禁止触发任务 |
+| `--web-user` | 用户名（配合密码登录，默认 `admin`） |
+| `--web-password-hash-file` | 密码哈希文件（用 `--web-hash-password` 生成） |
+| `--web-2fa` | `off`（默认）/ `totp`：密码登录后再要 6 位动态码 |
+| `--web-totp-secret-file` | TOTP secret 文件（用 `--web-gen-totp` 生成） |
 
 环境变量：`RBACKUP_WEB_TOKEN` / `RBACKUP_WEB_TOKEN_FILE` / `RBACKUP_WEB_ADDR`
 （命令行优先）。
+
+### 登录方式（token / 用户名密码 / TOTP 二次验证）
+
+三种方式可组合，token 始终保留为"忘记认证器"时的恢复入口。
+
+```bash
+# ① 生成密码哈希（交互输入密码，不回显）
+rbackup-tui --web-hash-password > ~/.config/rbackup-tui/web.passwd
+chmod 600 ~/.config/rbackup-tui/web.passwd
+
+# ② 生成 TOTP secret（用手机 Authenticator 扫码/手录 otpauth URI）
+rbackup-tui --web-gen-totp > /tmp/totp.txt
+cat /tmp/totp.txt                       # 记录 secret 和 otpauth URI
+sed -n '2p' /tmp/totp.txt > ~/.config/rbackup-tui/web.totp
+chmod 600 ~/.config/rbackup-tui/web.totp && rm -f /tmp/totp.txt
+
+# ③ 启动：密码 + TOTP，token 作为恢复方式
+rbackup-tui --web-addr 127.0.0.1:8080 \
+  --web-password-hash-file ~/.config/rbackup-tui/web.passwd \
+  --web-2fa totp --web-totp-secret-file ~/.config/rbackup-tui/web.totp \
+  --web-token-file ~/.config/rbackup-tui/web.token
+```
+
+- 密码哈希用 PBKDF2-HMAC-SHA256（60 万次迭代 + 随机盐），不存明文；
+- TOTP 为 RFC 6238（SHA1/6 位/30 秒，允许 ±1 窗口），已用过的动态码不能复用；
+- 登录失败限速：同 IP 每分钟 10 次；2FA 待验证会话 5 分钟过期、最多 5 次尝试；
+- 密码登录在**非 loopback** 下仍要求 TLS（或 `--web-insecure-http` + 可信 VPN）。
+
+### 界面主题与手机
+
+- 顶栏「🌓」按钮切换 **自动 / 亮色 / 暗色** 三种主题，选择保存在浏览器本地；
+- 手机窄屏：任务列表自动切换为**卡片**、操作按钮固定在底部（含安全区适配）、
+  触控目标 ≥44px；日志区独立滚动；登录输入框防 iOS 聚焦缩放。
 
 ### 安全默认（fail-closed）
 

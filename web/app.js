@@ -17,11 +17,46 @@ const S = {
   es: null,
   paused: false,
   stats: null,
+
+  // 登录状态
+  auth: { methods: [], totp: false, readOnly: false, version: '' },
+  hasToken: false,
+  hasPassword: false,
+  mode: 'token', // token | password | none
+  step: 'login', // login | totp
 };
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls) => { const n = document.createElement(tag); if (cls) n.className = cls; return n; };
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/* ---------- 主题（自动 / 亮 / 暗） ---------- */
+
+const THEME_KEY = 'rbtui-theme';
+const THEME_ICON = { auto: '🌓', light: '☀️', dark: '🌙' };
+const THEME_NAME = { auto: '跟随系统', light: '亮色', dark: '暗色' };
+const THEME_ORDER = ['auto', 'light', 'dark'];
+
+function currentTheme() {
+  try { return localStorage.getItem(THEME_KEY) || 'auto'; } catch (e) { return 'auto'; }
+}
+
+function applyTheme(mode) {
+  const root = document.documentElement;
+  if (mode === 'light' || mode === 'dark') root.dataset.theme = mode;
+  else delete root.dataset.theme;
+  try { localStorage.setItem(THEME_KEY, mode); } catch (e) { /* ignore */ }
+  for (const btn of [$('themeBtn'), $('loginThemeBtn')]) {
+    if (btn) {
+      btn.textContent = THEME_ICON[mode];
+      btn.title = '主题：' + THEME_NAME[mode] + '（点击切换）';
+    }
+  }
+}
+
+function cycleTheme() {
+  applyTheme(THEME_ORDER[(THEME_ORDER.indexOf(currentTheme()) + 1) % THEME_ORDER.length]);
+}
 
 /* ---------- API ---------- */
 
@@ -53,7 +88,6 @@ function showLogin(msg) {
   $('loginView').classList.remove('hidden');
   $('appView').classList.add('hidden');
   if (msg) showLoginError(msg);
-  $('tokenInput').focus();
 }
 
 function showApp() {
@@ -63,7 +97,7 @@ function showApp() {
 
 function showLoginError(msg) {
   const n = $('loginError');
-  n.textContent = msg;
+  n.textContent = msg || '';
   n.classList.toggle('hidden', !msg);
 }
 
@@ -77,38 +111,116 @@ function hideBanner() { $('banner').classList.add('hidden'); }
 
 function handleError(e) {
   if (e && e.status === 401) {
-    showApp(); // 先切回登录页
+    showApp();
     showLogin('会话已失效，请重新登录');
     return;
   }
   showBanner((e && e.message) || '操作失败');
 }
 
-/* ---------- 登录 ---------- */
+/* ---------- 登录（token / 密码 / TOTP） ---------- */
+
+async function fetchAuthInfo() {
+  try {
+    const r = await api('GET', '/api/authinfo');
+    S.auth = r;
+  } catch (e) {
+    S.auth = { methods: ['token'], totp: false };
+  }
+  S.hasToken = (S.auth.methods || []).includes('token');
+  S.hasPassword = (S.auth.methods || []).includes('password');
+  S.mode = S.hasPassword ? 'password' : (S.hasToken ? 'token' : 'none');
+  S.version = S.auth.version || S.version;
+  $('loginVersion').textContent = S.version || '';
+  renderLoginForm();
+}
+
+function renderLoginForm() {
+  const tokenFree = S.mode === 'none';
+  $('passwordFields').classList.toggle('hidden', S.mode !== 'password');
+  $('tokenFields').classList.toggle('hidden', tokenFree || S.mode !== 'token');
+  $('totpFields').classList.add('hidden');
+  $('loginBtn').textContent = tokenFree ? '进入' : '登录';
+  $('switchAuthBtn').classList.toggle('hidden', !(S.hasPassword && S.hasToken));
+  $('switchAuthBtn').textContent = S.mode === 'password' ? '改用 token 登录' : '改用用户名密码登录';
+
+  let hint = '正在获取登录方式…';
+  if (tokenFree) hint = '本机模式：无需凭据，点击下方按钮进入。';
+  else if (S.mode === 'password') hint = S.auth.totp ? '用户名密码登录，随后需要 6 位动态码。' : '用户名密码登录。';
+  else hint = '请输入访问 token。';
+  $('loginHint').textContent = hint;
+  $('loginFoot').textContent = '';
+  S.step = 'login';
+  showLoginError('');
+}
+
+function showTotpStep() {
+  S.step = 'totp';
+  $('passwordFields').classList.add('hidden');
+  $('tokenFields').classList.add('hidden');
+  $('totpFields').classList.remove('hidden');
+  $('switchAuthBtn').classList.add('hidden');
+  $('loginHint').textContent = '二次验证：输入认证器 App 中的 6 位动态码。';
+  $('loginBtn').textContent = '验证';
+  showLoginError('');
+  $('totpInput').value = '';
+  $('totpInput').focus();
+}
+
+function enterApp(r) {
+  S.csrf = r.csrf || S.csrf;
+  S.version = r.version || S.version;
+  S.readOnly = !!r.readOnly;
+  S.tokenFree = !!r.tokenFree;
+  showApp();
+  loadState().then(() => connectSSE()).catch(handleError);
+}
 
 $('loginForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   showLoginError('');
+  $('loginBtn').disabled = true;
   try {
-    const token = $('tokenInput').value;
-    const r = await api('POST', '/api/session', { token });
-    S.csrf = r.csrf;
-    S.version = r.version;
-    S.readOnly = r.readOnly;
-    S.tokenFree = r.tokenFree;
-    if (S.tokenFree) $('loginHint').textContent = '本机模式（无需 token），已登录';
-    showApp();
-    await loadState();
-    connectSSE();
+    if (S.step === 'totp') {
+      const code = ($('totpInput').value || '').trim();
+      if (!/^[0-9]{6}$/.test(code)) throw new Error('请输入 6 位数字动态码');
+      enterApp(await api('POST', '/api/session/totp', { code }));
+      return;
+    }
+    if (S.mode === 'none') {
+      enterApp(await api('POST', '/api/session', {}));
+    } else if (S.mode === 'password') {
+      const r = await api('POST', '/api/session', {
+        username: $('userInput').value,
+        password: $('passInput').value,
+      });
+      if (r.totpRequired) { showTotpStep(); return; }
+      enterApp(r);
+    } else {
+      enterApp(await api('POST', '/api/session', { token: $('tokenInput').value }));
+    }
   } catch (e) {
     showLoginError(e.message || '登录失败');
+    if (e.code === 'pending_expired') { renderLoginForm(); }
+    $('passInput').value = '';
+    if (S.step === 'totp') $('totpInput').value = '';
+  } finally {
+    $('loginBtn').disabled = false;
   }
+});
+
+$('switchAuthBtn').addEventListener('click', () => {
+  S.mode = S.mode === 'password' ? 'token' : 'password';
+  renderLoginForm();
 });
 
 $('logoutBtn').addEventListener('click', async () => {
   try { await api('DELETE', '/api/session'); } catch (_) { /* ignore */ }
   if (S.es) { S.es.close(); S.es = null; }
-  location.reload();
+  S.csrf = '';
+  S.selected = new Set();
+  showLogin();
+  renderLoginForm();
 });
 
 /* ---------- 状态加载与渲染 ---------- */
@@ -133,7 +245,6 @@ async function loadState() {
 
 function renderAll() {
   $('version').textContent = S.version;
-  $('loginVersion').textContent = S.version;
   renderMeta();
   renderInfo();
   renderTasks();
@@ -169,22 +280,39 @@ function gateText(t) {
   return '—';
 }
 
+function dangerText(t) {
+  if (!t.dangerous) return '';
+  return [t.delete === 'yes' ? '删除' : '', t.removeSource === 'yes' ? '删源' : ''].filter(Boolean).join('+') || '危险';
+}
+
+function toggleTask(name, checked) {
+  if (checked) S.selected.add(name); else S.selected.delete(name);
+  renderButtons();
+  syncSelectAll();
+}
+
+function syncSelectAll() {
+  const all = $('selectAll');
+  all.checked = S.tasks.length > 0 && S.selected.size === S.tasks.length;
+}
+
 function renderTasks() {
   const body = $('taskBody');
   body.innerHTML = '';
+  const cards = $('taskCards');
+  cards.innerHTML = '';
   $('emptyHint').classList.toggle('hidden', S.tasks.length > 0);
+  const disabled = isBusy() || S.readOnly;
 
   for (const t of S.tasks) {
+    /* --- 桌面表格行 --- */
     const tr = el('tr');
     const td1 = el('td', 'c-chk');
     const cb = el('input');
     cb.type = 'checkbox';
     cb.checked = S.selected.has(t.name);
-    cb.disabled = isBusy() || S.readOnly;
-    cb.addEventListener('change', () => {
-      if (cb.checked) S.selected.add(t.name); else S.selected.delete(t.name);
-      renderButtons();
-    });
+    cb.disabled = disabled;
+    cb.addEventListener('change', () => toggleTask(t.name, cb.checked));
     td1.appendChild(cb);
     tr.appendChild(td1);
 
@@ -209,18 +337,54 @@ function renderTasks() {
     const tdDanger = el('td', 'c-danger');
     if (t.dangerous) {
       const b = el('span', 'badge failed');
-      b.textContent = [t.delete === 'yes' ? '删除' : '', t.removeSource === 'yes' ? '删源' : ''].filter(Boolean).join('+') || '危险';
+      b.textContent = dangerText(t);
       tdDanger.appendChild(b);
     } else {
       tdDanger.textContent = '—';
     }
     tr.appendChild(tdDanger);
     body.appendChild(tr);
+
+    /* --- 手机端卡片 --- */
+    const card = el('div', 'task-card');
+    const ccb = el('input');
+    ccb.type = 'checkbox';
+    ccb.checked = S.selected.has(t.name);
+    ccb.disabled = disabled;
+    ccb.addEventListener('change', () => toggleTask(t.name, ccb.checked));
+    const main = el('div', 'tc-main');
+    const name = el('div', 'tc-name');
+    name.textContent = t.name;
+    main.appendChild(name);
+    const src = el('div', 'tc-line');
+    src.textContent = '源: ' + (t.src || '-');
+    main.appendChild(src);
+    const dst = el('div', 'tc-line');
+    dst.textContent = '目标: ' + (t.dst || '-');
+    main.appendChild(dst);
+    const badges = el('div', 'badge-row');
+    const gb = el('span', 'badge');
+    gb.textContent = '门禁: ' + gateText(t);
+    badges.appendChild(gb);
+    if (t.dangerous) {
+      const db = el('span', 'badge failed');
+      db.textContent = dangerText(t);
+      badges.appendChild(db);
+    }
+    main.appendChild(badges);
+    card.appendChild(ccb);
+    card.appendChild(main);
+    card.addEventListener('click', (ev) => {
+      if (ev.target === ccb) return;
+      ccb.checked = !ccb.checked;
+      toggleTask(t.name, ccb.checked);
+    });
+    cards.appendChild(card);
   }
 
   const all = $('selectAll');
+  all.disabled = disabled;
   all.checked = S.tasks.length > 0 && S.selected.size === S.tasks.length;
-  all.disabled = isBusy() || S.readOnly;
   renderButtons();
 }
 
@@ -234,7 +398,9 @@ function renderButtons() {
   for (const id of ['runBtn', 'dryBtn', 'mountBtn', 'reloadBtn']) $(id).disabled = disabled;
   $('selectAll').disabled = disabled;
   $('cancelBtn').classList.toggle('hidden', !busy || S.readOnly);
-  for (const cb of document.querySelectorAll('#taskBody input[type=checkbox]')) cb.disabled = disabled;
+  for (const cb of document.querySelectorAll('#taskBody input[type=checkbox], #taskCards input[type=checkbox]')) {
+    cb.disabled = disabled;
+  }
 }
 
 const JOB_STATE_TEXT = {
@@ -311,8 +477,10 @@ function openConfirm(names, danger) {
   const ul = el('ul', 'modal-list');
   for (const t of danger) {
     const li = el('li');
-    const flags = [t.delete === 'yes' ? '--delete（删除目标端多余文件）' : '',
-      t.removeSource === 'yes' ? '--remove-source-files（删除本地源文件）' : ''].filter(Boolean).join('，');
+    const flags = [
+      t.delete === 'yes' ? '--delete（删除目标端多余文件）' : '',
+      t.removeSource === 'yes' ? '--remove-source-files（删除本地源文件）' : '',
+    ].filter(Boolean).join('，');
     li.textContent = t.name + '：' + flags;
     ul.appendChild(li);
   }
@@ -429,7 +597,10 @@ function onJobState(d) {
 }
 
 function onJobSummary(d) {
-  S.stats = { filesTransferred: d.files, filesTotal: d.filesTotal, totalSize: d.totalSize, data: d.data, rate: d.rate, rsync: d.rsync, list: d.list };
+  S.stats = {
+    filesTransferred: d.files, filesTotal: d.filesTotal, totalSize: d.totalSize,
+    data: d.data, rate: d.rate, rsync: d.rsync, list: d.list,
+  };
   renderStats();
 }
 
@@ -449,5 +620,7 @@ function connectSSE() {
 
 /* ---------- 启动 ---------- */
 
-showLogin();
-$('tokenInput').focus();
+applyTheme(currentTheme());
+$('themeBtn').addEventListener('click', cycleTheme);
+$('loginThemeBtn').addEventListener('click', cycleTheme);
+fetchAuthInfo();
