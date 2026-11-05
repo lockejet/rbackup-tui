@@ -6,6 +6,7 @@ require (
 	github.com/gdamore/tcell/v2 v2.13.10
 	github.com/rivo/tview v0.42.0
 	golang.org/x/term v0.37.0
+	rsc.io/qr v0.2.0
 )
 
 require (

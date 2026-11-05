@@ -739,3 +739,54 @@ func TestWebTokenWhitespaceTolerant(t *testing.T) {
 		t.Fatalf("带首尾空白的 token 应被接受: code=%d resp=%+v", code, r)
 	}
 }
+
+// TestRenderQRTerminal 验证终端二维码渲染（半块字符、尺寸、静区）。
+func TestRenderQRTerminal(t *testing.T) {
+	uri := otpauthURI("rbackup-ui", "admin", "JBSWY3DPEHPK3PXP")
+	var buf strings.Builder
+	if err := renderQRTerminal(&buf, uri); err != nil {
+		t.Fatalf("renderQRTerminal: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "▀") {
+		t.Fatal("输出应包含半块字符")
+	}
+	plain := out
+	// 去掉 ANSI 颜色码后统计行数与宽度
+	plain = stripANSI(plain)
+	lines := strings.Split(strings.TrimRight(plain, "\n"), "\n")
+	if len(lines) < 20 {
+		t.Fatalf("二维码行数过少: %d", len(lines))
+	}
+	width := len([]rune(lines[0]))
+	if width < 20 || width != len([]rune(lines[len(lines)-1])) {
+		t.Fatalf("二维码宽度异常: %d", width)
+	}
+}
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	skip := false
+	for _, r := range s {
+		if r == '\x1b' {
+			skip = true
+			continue
+		}
+		if skip {
+			if r == 'm' {
+				skip = false
+			}
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func TestOTPAuthURI(t *testing.T) {
+	uri := otpauthURI("rbackup-ui", "admin", "ABC234")
+	if !strings.HasPrefix(uri, "otpauth://totp/") || !strings.Contains(uri, "secret=ABC234") ||
+		!strings.Contains(uri, "issuer=rbackup-ui") {
+		t.Fatalf("otpauth URI 异常: %s", uri)
+	}
+}

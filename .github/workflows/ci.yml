@@ -48,7 +48,7 @@ jobs:
       - name: gofmt 提示（不阻塞）
         continue-on-error: true
         run: |
-          mapfile -t files < <(gofmt -l main.go config.go runner.go main_test.go web.go webauth.go web_test.go proc_unix.go proc_windows.go)
+          mapfile -t files < <(gofmt -l main.go config.go runner.go main_test.go web.go webauth.go qrterm.go web_test.go proc_unix.go proc_windows.go)
           if [ "${#files[@]}" -gt 0 ]; then
             echo "::warning::以下文件未通过 gofmt: ${files[*]}"
             gofmt -d "${files[@]}" | head -60

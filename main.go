@@ -402,7 +402,8 @@ Web 选项:
   --web-2fa <off|totp>          二次验证模式（默认 off；totp 需配合密码登录）
   --web-totp-secret-file <f>    TOTP secret 文件（先跑 --web-gen-totp 生成）
   --web-hash-password           交互式生成密码哈希后退出
-  --web-gen-totp                生成 TOTP secret 与 otpauth URI 后退出
+  --web-gen-totp                生成 TOTP secret 与 otpauth URI（终端里显示二维码）
+  --web-show-totp-qr            显示"现有" TOTP secret 的二维码（不轮换）
 
 环境变量: RBACKUP_WEB_TOKEN / RBACKUP_WEB_TOKEN_FILE / RBACKUP_WEB_ADDR
 安全默认: 监听非 loopback 地址必须 token + TLS，否则拒绝启动；
@@ -535,6 +536,8 @@ func parseCLI(args []string) (configPath, scriptPath string, err error) {
 			os.Exit(runHashPasswordCLI())
 		case "--web-gen-totp":
 			os.Exit(runGenTOTPCLI(webOpts.User))
+		case "--web-show-totp-qr":
+			os.Exit(runShowTOTPCLI(webOpts.TOTPSecretFile, webOpts.User))
 		case "--web-max-clients":
 			if v, err = argValue(args, &i, args[i]); err != nil {
 				return "", "", err

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -253,7 +254,39 @@ func runHashPasswordCLI() int {
 	return 0
 }
 
-// runGenTOTPCLI 对应 --web-gen-totp：生成 secret 与 otpauth URI。
+// defaultTOTPSecretFile 返回默认的 TOTP secret 文件路径（XDG 配置目录）。
+func defaultTOTPSecretFile() string {
+	return filepath.Join(xdgConfigDir(), "rbackup-ui", "web.totp")
+}
+
+// runShowTOTPCLI 对应 --web-show-totp-qr：为"现有" secret 显示二维码（不轮换）。
+func runShowTOTPCLI(secretFile, account string) int {
+	if secretFile == "" {
+		secretFile = defaultTOTPSecretFile()
+	}
+	b, err := os.ReadFile(secretFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "错误: 读取 TOTP secret 失败: %v\n", err)
+		fmt.Fprintf(os.Stderr, "提示: 用 --web-totp-secret-file 指定路径，或先运行 --web-gen-totp 生成\n")
+		return 1
+	}
+	if _, err := decodeTOTPSecret(string(b)); err != nil {
+		fmt.Fprintf(os.Stderr, "错误: secret 格式不对: %v\n", err)
+		return 1
+	}
+	if account == "" {
+		account = "admin"
+	}
+	secretStr := strings.TrimRight(strings.ToUpper(strings.TrimSpace(string(b))), "=")
+	uri := otpauthURI("rbackup-ui", account, secretStr)
+	fmt.Println("otpauth URI:")
+	fmt.Println(uri)
+	fmt.Println()
+	printTOTPQR(uri)
+	return 0
+}
+
+// runGenTOTPCLI 对应 --web-gen-totp：生成 secret 与 otpauth URI（会轮换 secret）。
 func runGenTOTPCLI(account string) int {
 	secret, err := newTOTPSecret()
 	if err != nil {
@@ -266,9 +299,12 @@ func runGenTOTPCLI(account string) int {
 	fmt.Println("TOTP secret（base32）:")
 	fmt.Println(secret)
 	fmt.Println()
+	uri := otpauthURI("rbackup-ui", account, secret)
 	fmt.Println("otpauth URI（手动添加到 Authenticator / 支持 otpauth 的密码管理器）:")
-	fmt.Println(otpauthURI("rbackup-ui", account, secret))
+	fmt.Println(uri)
 	fmt.Println()
+	// 在终端里直接画二维码（stdout 重定向时只输出上面的文本，二维码走 stderr）
+	printTOTPQR(uri)
 	fmt.Fprintln(os.Stderr, "把 secret 保存到文件（如 ~/.config/rbackup-ui/web.totp，chmod 600），")
 	fmt.Fprintln(os.Stderr, "然后启动时用 --web-2fa totp --web-totp-secret-file 指定。")
 	fmt.Fprintln(os.Stderr, "注意：token 登录不受 TOTP 限制（token 作为恢复方式），")

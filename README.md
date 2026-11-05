@@ -656,11 +656,16 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 rbackup-ui --web-hash-password > ~/.config/rbackup-ui/web.passwd
 chmod 600 ~/.config/rbackup-ui/web.passwd
 
-# ② 生成 TOTP secret（用手机 Authenticator 扫码/手录 otpauth URI）
-rbackup-ui --web-gen-totp > /tmp/totp.txt
-cat /tmp/totp.txt                       # 记录 secret 和 otpauth URI
-sed -n '2p' /tmp/totp.txt > ~/.config/rbackup-ui/web.totp
-chmod 600 ~/.config/rbackup-ui/web.totp && rm -f /tmp/totp.txt
+# ② 生成 TOTP secret；终端里会直接显示二维码，手机 Authenticator 扫码即可
+#    注意：这会生成新 secret；已录入过认证器就不要重跑，改用 --web-show-totp-qr
+rbackup-ui --web-gen-totp
+
+# 如需把 secret 存文件（二维码在 stderr，不会污染 stdout）：
+rbackup-ui --web-gen-totp 2>/dev/null | sed -n '2p' > ~/.config/rbackup-ui/web.totp
+chmod 600 ~/.config/rbackup-ui/web.totp
+
+# 已经录入过认证器、只是想再显示一次二维码（不会轮换 secret）：
+rbackup-ui --web-show-totp-qr
 
 # ③ 启动：默认监听 127.0.0.1:30031，密码 + TOTP，token 作为恢复方式
 rbackup-ui \

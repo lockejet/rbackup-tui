@@ -577,7 +577,9 @@ rbackup.example.com {
 - 流程：密码校验通过 → 发 5 分钟有效的 HttpOnly 待验证 Cookie → `POST /api/session/totp`
   校验 6 位码（±1 窗口）→ 才发正式会话 Cookie；
 - 防重放：已用过的 30s 窗口不能再次使用；待验证会话最多 5 次尝试；
-- `rbackup-ui --web-gen-totp` 生成 secret 与 `otpauth://` URI；
+- `rbackup-ui --web-gen-totp` 生成 secret 与 `otpauth://` URI，终端里直接渲染二维码；
+  `--web-show-totp-qr` 可对现有 secret 重新显示二维码（不轮换）；
+  二维码渲染可用 `RBACKUP_NO_QR=1` 关闭、`RBACKUP_QR=1` 强制输出；
 - **token 登录跳过 TOTP**（token 本身就是强凭据，也作为丢失认证器时的恢复入口）。
 
 ### 15.5 新增接口与前端
