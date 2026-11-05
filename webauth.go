@@ -251,6 +251,7 @@ func runHashPasswordCLI() int {
 	fmt.Println(hash)
 	fmt.Fprintln(os.Stderr, "把输出写入文件（如 ~/.config/rbackup-ui/web.passwd，chmod 600），")
 	fmt.Fprintln(os.Stderr, "然后启动时用 --web-password-hash-file 指定。")
+	fmt.Fprintln(os.Stderr, "注意：如果 Web 服务已在运行，修改密码/哈希文件后必须重启服务才生效。")
 	return 0
 }
 
@@ -307,6 +308,7 @@ func runGenTOTPCLI(account string) int {
 	printTOTPQR(uri)
 	fmt.Fprintln(os.Stderr, "把 secret 保存到文件（如 ~/.config/rbackup-ui/web.totp，chmod 600），")
 	fmt.Fprintln(os.Stderr, "然后启动时用 --web-2fa totp --web-totp-secret-file 指定。")
+	fmt.Fprintln(os.Stderr, "注意：如果 Web 服务已在运行，修改 secret 文件后必须重启服务才生效。")
 	fmt.Fprintln(os.Stderr, "注意：token 登录不受 TOTP 限制（token 作为恢复方式），")
 	fmt.Fprintln(os.Stderr, "所以请妥善保管 token、并确保 2FA 与 TLS/VPN 一起使用。")
 	return 0
@@ -328,4 +330,30 @@ func validPasswordHash(encoded string) bool {
 	}
 	key, err := base64.RawStdEncoding.DecodeString(parts[3])
 	return err == nil && len(key) > 0
+}
+
+// runShowTOTPCodeCLI 对应 --web-show-totp-code：用指定 secret 计算"当前"动态码，
+// 仅用于排查"App 里的码和服务端不一致"这类问题。
+func runShowTOTPCodeCLI(secretFile string) int {
+	if secretFile == "" {
+		secretFile = defaultTOTPSecretFile()
+	}
+	b, err := os.ReadFile(secretFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "错误: 读取 TOTP secret 失败: %v\n", err)
+		return 1
+	}
+	secret, err := decodeTOTPSecret(string(b))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "错误: secret 格式不对: %v\n", err)
+		return 1
+	}
+	now := time.Now()
+	code := totpCode(secret, now)
+	left := totpPeriod - int(now.Unix()%totpPeriod)
+	fmt.Printf("secret 文件: %s\n", secretFile)
+	fmt.Printf("当前动态码: %s（%d 秒后刷新）\n", code, left)
+	fmt.Fprintln(os.Stderr, "提示: 把这个码和你 App 里显示的对比；不一致通常是 secret 不同或时钟偏差。")
+	fmt.Fprintln(os.Stderr, "      修改 secret/密码/token 文件后，运行中的服务必须重启才会生效。")
+	return 0
 }
