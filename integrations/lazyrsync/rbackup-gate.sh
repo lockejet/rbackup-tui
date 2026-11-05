@@ -9,12 +9,12 @@
 #           三处都走 rsync::binary()，即 rsync_path，所以一处接入即全生效。
 #
 # 用法（settings.toml）：
-#   rsync_path = "/path/to/rbackup-tui/integrations/lazyrsync/rbackup-gate.sh"
+#   rsync_path = "/path/to/rbackup-ui/integrations/lazyrsync/rbackup-gate.sh"
 #
 # lazyrsync 任务的 advanced.raw_args 里带上任务名，门禁参数即可直接复用
 # 你现有的 config*.ini（单一配置源，不重复维护）：
 #   [profile.task.advanced]
-#   raw_args = "--rbackup-task=alice --rbackup-config=/path/to/rbackup-tui/config.ini"
+#   raw_args = "--rbackup-task=alice --rbackup-config=/path/to/rbackup-ui/config.ini"
 #
 # 环境变量：
 #   RBACKUP_REAL_RSYNC  真正的 rsync（默认 /usr/bin/rsync，或 $PATH 里第一个）

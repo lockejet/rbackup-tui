@@ -248,7 +248,7 @@ func runHashPasswordCLI() int {
 		return 1
 	}
 	fmt.Println(hash)
-	fmt.Fprintln(os.Stderr, "把输出写入文件（如 ~/.config/rbackup-tui/web.passwd，chmod 600），")
+	fmt.Fprintln(os.Stderr, "把输出写入文件（如 ~/.config/rbackup-ui/web.passwd，chmod 600），")
 	fmt.Fprintln(os.Stderr, "然后启动时用 --web-password-hash-file 指定。")
 	return 0
 }
@@ -267,9 +267,9 @@ func runGenTOTPCLI(account string) int {
 	fmt.Println(secret)
 	fmt.Println()
 	fmt.Println("otpauth URI（手动添加到 Authenticator / 支持 otpauth 的密码管理器）:")
-	fmt.Println(otpauthURI("rbackup-tui", account, secret))
+	fmt.Println(otpauthURI("rbackup-ui", account, secret))
 	fmt.Println()
-	fmt.Fprintln(os.Stderr, "把 secret 保存到文件（如 ~/.config/rbackup-tui/web.totp，chmod 600），")
+	fmt.Fprintln(os.Stderr, "把 secret 保存到文件（如 ~/.config/rbackup-ui/web.totp，chmod 600），")
 	fmt.Fprintln(os.Stderr, "然后启动时用 --web-2fa totp --web-totp-secret-file 指定。")
 	fmt.Fprintln(os.Stderr, "注意：token 登录不受 TOTP 限制（token 作为恢复方式），")
 	fmt.Fprintln(os.Stderr, "所以请妥善保管 token、并确保 2FA 与 TLS/VPN 一起使用。")

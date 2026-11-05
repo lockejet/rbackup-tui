@@ -50,9 +50,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/smoke
-          tar xzf dist/rbackup-tui-"$TAG"-linux-amd64.tar.gz -C /tmp/smoke
-          dir="$(find /tmp/smoke -maxdepth 1 -type d -name 'rbackup-tui-*' | head -n1)"
-          test -x "$dir/rbackup-tui"
+          tar xzf dist/rbackup-ui-"$TAG"-linux-amd64.tar.gz -C /tmp/smoke
+          dir="$(find /tmp/smoke -maxdepth 1 -type d -name 'rbackup-ui-*' | head -n1)"
+          test -x "$dir/rbackup-ui"
           test -x "$dir/rbackup.sh"
           test -f "$dir/config1.ini.example"
           "$dir/rbackup.sh" --help >/dev/null

@@ -17,6 +17,7 @@ config-*.ini
 # 备份
 /backup/
 /rbackup.d/
+/rbackup-ui.d/
 /rbackup-tui.d/
 
 # 编辑器
@@ -24,3 +25,7 @@ config-*.ini
 *.save
 .vscode/
 .idea/
+
+# 本地构建产物（go build . 会生成）
+/rbackup-ui
+/rbackup-tui

@@ -1,6 +1,6 @@
 'use strict';
 
-/* rbackup-tui Web UI —— 原生 JS，无框架、无构建步骤。 */
+/* rbackup-ui Web UI —— 原生 JS，无框架、无构建步骤。 */
 
 const S = {
   csrf: '',

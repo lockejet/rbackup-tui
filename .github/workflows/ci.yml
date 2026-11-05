@@ -28,7 +28,7 @@ jobs:
         run: go test -v ./...
 
       - name: 构建当前平台
-        run: go build -ldflags "-X main.Version=ci" -o /tmp/rbackup-tui .
+        run: go build -ldflags "-X main.Version=ci" -o /tmp/rbackup-ui .
 
       - name: 前端 JS 语法检查
         run: node --check web/app.js
@@ -39,7 +39,7 @@ jobs:
           mkdir -p /tmp/rb-ci
           for target in linux/amd64 linux/arm64 windows/amd64; do
             os="${target%/*}"; arch="${target#*/}"
-            out="/tmp/rb-ci/rbackup-tui-${os}-${arch}"
+            out="/tmp/rb-ci/rbackup-ui-${os}-${arch}"
             [ "$os" = "windows" ] && out="${out}.exe"
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -ldflags "-X main.Version=ci" -o "$out" .
             echo "✓ $out"
@@ -84,13 +84,13 @@ jobs:
 
           # 日志目录必须遵循 XDG_STATE_HOME
           dir="$(XDG_STATE_HOME=/tmp/xdg-state ./rbackup.sh --print-log-dir)"
-          test "$dir" = "/tmp/xdg-state/rbackup-tui/log" \
+          test "$dir" = "/tmp/xdg-state/rbackup-ui/log" \
             || { echo "✗ XDG 日志目录不符: $dir"; exit 1; }
           echo "✓ XDG 日志目录: $dir"
 
           # XDG_STATE_HOME 未设置时回退到 ~/.local/state
           dir="$(env -u XDG_STATE_HOME HOME=/tmp/fake-home ./rbackup.sh --print-log-dir)"
-          test "$dir" = "/tmp/fake-home/.local/state/rbackup-tui/log" \
+          test "$dir" = "/tmp/fake-home/.local/state/rbackup-ui/log" \
             || { echo "✗ XDG 回退目录不符: $dir"; exit 1; }
           echo "✓ XDG 回退目录: $dir"
 

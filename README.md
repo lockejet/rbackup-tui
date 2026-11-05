@@ -1,4 +1,4 @@
-# rbackup-tui
+# rbackup-ui
 
 rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync 远程备份。
 
@@ -91,7 +91,7 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
   - [按 F1 或 ? 后帮助浮层出现但按键无响应？](#按-f1-或--后帮助浮层出现但按键无响应)
   - [Windows 下按键重复触发？](#windows-下按键重复触发)
   - [Windows 下 ESC 无法退出？](#windows-下-esc-无法退出)
-  - [Linux 下 rbackup-tui 找不到 bash？](#linux-下-rbackup-tui-找不到-bash)
+  - [Linux 下 rbackup-ui 找不到 bash？](#linux-下-rbackup-ui-找不到-bash)
   - [rsync 输出没显示？](#rsync-输出没显示)
   - [日志目录不可写？](#日志目录不可写)
   - [如何只做挂载检查？](#如何只做挂载检查)
@@ -134,7 +134,7 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 
 ## 界面说明
 
-![rbackup-tui 界面示意](docs/images/ui-overview.svg)
+![rbackup-ui 界面示意](docs/images/ui-overview.svg)
 
 上图由 `tools/gen-ui-preview.py` 生成（矢量图，可随界面调整重新生成）。
 终端高度 ≥ 31 行时完整显示；下面折叠块是同一布局的等宽纯文本版。
@@ -144,10 +144,10 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 
 ```text
 ┌─ rbackup ─────────────────────────────────────────────────────────────────────────────┐
-│脚本: ~/.local/bin/rbackup.sh   配置: ~/.config/rbackup-tui/config.ini                  │
+│脚本: ~/.local/bin/rbackup.sh   配置: ~/.config/rbackup-ui/config.ini                  │
 │远端: admin@example.com:22   策略: skip（门禁失败时跳过）                               │
-│日志: ~/.local/state/rbackup-tui/log/20260928_1922.log                                  │
-│统计: ~/.local/state/rbackup-tui/log/20260928_1922.stats                                │
+│日志: ~/.local/state/rbackup-ui/log/20260928_1922.log                                  │
+│统计: ~/.local/state/rbackup-ui/log/20260928_1922.stats                                │
 ├─ [2] 任务列表 ────────────────────────────────────────────────────────────────────────┤
 │    任务名          源                                目标                  门禁        │
 │  ● alice           /d/alice/my_company/              /srv/.../doc-alice    已挂载      │
@@ -214,10 +214,10 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 一条命令，自动识别系统与架构，从 GitHub Releases 下载预编译包并校验 SHA256：
 
     # 用户级（无需 sudo）
-    curl -fsSL https://github.com/lockejet/rbackup-tui/releases/latest/download/install.sh | bash
+    curl -fsSL https://github.com/lockejet/rbackup-ui/releases/latest/download/install.sh | bash
 
     # 系统级（装到 /usr/local/bin，需要 sudo）
-    curl -fsSL https://github.com/lockejet/rbackup-tui/releases/latest/download/install.sh | sudo bash -s -- --system
+    curl -fsSL https://github.com/lockejet/rbackup-ui/releases/latest/download/install.sh | sudo bash -s -- --system
 
 常用参数：
 
@@ -235,28 +235,28 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
 
 | | 用户级 | 系统级 |
 |---|---|---|
-| 主程序 | `~/.local/bin/rbackup-tui` | `/usr/local/bin/rbackup-tui` |
+| 主程序 | `~/.local/bin/rbackup-ui` | `/usr/local/bin/rbackup-ui` |
 | 后端脚本 | `~/.local/bin/rbackup.sh` | `/usr/local/bin/rbackup.sh` |
-| 配置 | `~/.config/rbackup-tui/config.ini` | 仍按调用 sudo 的那个用户：`~/.config/rbackup-tui/config.ini` |
-| 日志 | `LOG_DIR` 可覆盖；默认 `$XDG_STATE_HOME/rbackup-tui/log`（Windows `%LOCALAPPDATA%\rbackup-tui\Logs`） | 同左 |
-| 样例 / 文档 | `~/.local/share/rbackup-tui/` | `/usr/local/share/rbackup-tui/` |
+| 配置 | `~/.config/rbackup-ui/config.ini` | 仍按调用 sudo 的那个用户：`~/.config/rbackup-ui/config.ini` |
+| 日志 | `LOG_DIR` 可覆盖；默认 `$XDG_STATE_HOME/rbackup-ui/log`（Windows `%LOCALAPPDATA%\rbackup-ui\Logs`） | 同左 |
+| 样例 / 文档 | `~/.local/share/rbackup-ui/` | `/usr/local/share/rbackup-ui/` |
 
 各路径遵循 XDG 规范：`XDG_CONFIG_HOME`（Windows 为 `%AppData%`）、
 `XDG_STATE_HOME`、`XDG_DATA_HOME` 设置后按设置生效。日志在 Windows 上用
-`%LOCALAPPDATA%\rbackup-tui\Logs`（无 `XDG_STATE_HOME` 概念）。
+`%LOCALAPPDATA%\rbackup-ui\Logs`（无 `XDG_STATE_HOME` 概念）。
 
 Windows（MSYS2 / Git Bash）下用户级安装到 `~/.local/bin`；`--system` 装到
-`%LOCALAPPDATA%/Programs/rbackup-tui`（无需管理员权限）。
+`%LOCALAPPDATA%/Programs/rbackup-ui`（无需管理员权限）。
 
 ### 方式二：git clone 模式（不需要 Go）
 
-    git clone https://github.com/lockejet/rbackup-tui.git
-    cd rbackup-tui
+    git clone https://github.com/lockejet/rbackup-ui.git
+    cd rbackup-ui
 
     make install-prebuilt                 # 用户级，装当前检出对应的版本
     make install-prebuilt SYSTEM=1        # 系统级
     make install-prebuilt VERSION=vX.Y.Z  # 指定版本
-    make install-prebuilt FROM=dist/rbackup-tui-vX.Y.Z-linux-amd64.tar.gz   # 离线
+    make install-prebuilt FROM=dist/rbackup-ui-vX.Y.Z-linux-amd64.tar.gz   # 离线
 
 全程只下载预编译包，不会调用 `go`。
 
@@ -264,8 +264,8 @@ Windows（MSYS2 / Git Bash）下用户级安装到 `~/.local/bin`；`--system` �
 
 依赖：Go 1.27+（见 `go.mod`）
 
-    git clone https://github.com/lockejet/rbackup-tui.git
-    cd rbackup-tui
+    git clone https://github.com/lockejet/rbackup-ui.git
+    cd rbackup-ui
 
     make install            # 用户级：编译并装到 ~/.local/bin
     make install-system     # 系统级：编译后 sudo 装到 /usr/local/bin
@@ -277,14 +277,14 @@ Windows（MSYS2 / Git Bash）下用户级安装到 `~/.local/bin`；`--system` �
     make uninstall                                          # 在克隆目录里执行
     curl -fsSL .../install.sh | bash -s -- --uninstall       # 预编译安装的
 
-只删除程序文件（含安装清单里记录的所有文件），保留 `~/.config/rbackup-tui/` 下的配置与日志。
+只删除程序文件（含安装清单里记录的所有文件），保留 `~/.config/rbackup-ui/` 下的配置与日志。
 
 ### 手动解压（不想用安装器）
 
 从 GitHub Releases 下载对应平台的压缩包，解压后目录结构：
 
-    rbackup-tui-linux-amd64/
-    ├── rbackup-tui
+    rbackup-ui-linux-amd64/
+    ├── rbackup-ui
     ├── rbackup.sh
     ├── config1.ini.example
     ├── config2.ini.example
@@ -295,7 +295,7 @@ Windows（MSYS2 / Git Bash）下用户级安装到 `~/.local/bin`；`--system` �
 
     cp config2.ini.example config2.ini
     vim config2.ini
-    ./rbackup-tui -c config2.ini -s rbackup.sh
+    ./rbackup-ui -c config2.ini -s rbackup.sh
 
 `rbackup.sh` 与二进制同目录时，`-s` 可以省略。
 
@@ -303,7 +303,7 @@ Windows（MSYS2 / Git Bash）下用户级安装到 `~/.local/bin`；`--system` �
 
 ## 配置
 
-rbackup-tui 与 rbackup.sh 共用 config.ini，格式一致。
+rbackup-ui 与 rbackup.sh 共用 config.ini，格式一致。
 
 ### 全局配置
 
@@ -313,7 +313,7 @@ rbackup-tui 与 rbackup.sh 共用 config.ini，格式一致。
 | SSH_PORT | SSH 端口 | 22 |
 | SSH_USER | SSH 用户名 | admin |
 | SSH_KEY | SSH 私钥路径 | ~/.ssh/id_ed25519 |
-| LOG_DIR | 日志目录（可选覆盖） | `$XDG_STATE_HOME/rbackup-tui/log`；Windows `%LOCALAPPDATA%\rbackup-tui\Logs` |
+| LOG_DIR | 日志目录（可选覆盖） | `$XDG_STATE_HOME/rbackup-ui/log`；Windows `%LOCALAPPDATA%\rbackup-ui\Logs` |
 | GLOBAL_OPTS | rsync 全局选项 | -avzhu --progress |
 | RSYNC_PATH | 提权命令 | sudo rsync |
 | DEFAULT_REMOVE_SOURCE | 源端删除默认值 | no |
@@ -403,7 +403,7 @@ rsync 只允许 `--chown` 出现一次。可以放在：
     SSH_PORT=22
     SSH_KEY=~/.ssh/id_ed25519
     # 日志目录（可选；不写则跟随平台：
-    #   Linux $XDG_STATE_HOME/rbackup-tui/log，Windows %LOCALAPPDATA%\rbackup-tui\Logs）
+    #   Linux $XDG_STATE_HOME/rbackup-ui/log，Windows %LOCALAPPDATA%\rbackup-ui\Logs）
     #LOG_DIR=/var/log/rbackup
     GLOBAL_OPTS=-avzhu --progress --no-perms --omit-dir-times --chown=admin:users --update --delete-after
     RSYNC_PATH=sudo rsync
@@ -480,7 +480,7 @@ rsync 只允许 `--chown` 出现一次。可以放在：
     SSH_KEY=~/.ssh/id_ed25519
 
     # 日志目录（可选；不写则跟随平台：
-    #   Linux $XDG_STATE_HOME/rbackup-tui/log，Windows %LOCALAPPDATA%\rbackup-tui\Logs）
+    #   Linux $XDG_STATE_HOME/rbackup-ui/log，Windows %LOCALAPPDATA%\rbackup-ui\Logs）
     #LOG_DIR=/var/log/rbackup
 
     # 全局 rsync 默认选项（可被任务级 opts 追加覆盖）
@@ -551,7 +551,7 @@ rsync 只允许 `--chown` 出现一次。可以放在：
     cp config1.ini.example config1.ini
     vim config1.ini
 
-    rbackup-tui -c config1.ini -s rbackup.sh
+    rbackup-ui -c config1.ini -s rbackup.sh
 
 ---
 
@@ -559,14 +559,14 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 
 ### 启动
 
-    # 默认读取 $XDG_CONFIG_HOME/rbackup-tui/config.ini（即 ~/.config/rbackup-tui/config.ini）
-    rbackup-tui
+    # 默认读取 $XDG_CONFIG_HOME/rbackup-ui/config.ini（即 ~/.config/rbackup-ui/config.ini）
+    rbackup-ui
 
     # 指定配置
-    rbackup-tui -c ~/rbackup-tui/config-lnas.ini
+    rbackup-ui -c ~/rbackup-ui/config-lnas.ini
 
     # 指定脚本
-    rbackup-tui -c ~/rbackup-tui/config-lnas.ini -s ~/.local/bin/rbackup.sh
+    rbackup-ui -c ~/rbackup-ui/config-lnas.ini -s ~/.local/bin/rbackup.sh
 
 ### 命令行参数
 
@@ -582,15 +582,15 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 1. 命令行 `-s` 指定
 2. 环境变量 `RBACKUP_SCRIPT`
 3. 二进制同目录（安装器与发布包的场景：`rbackup.sh` 与主程序并排）
-4. `$HOME/rbackup-tui/rbackup.sh`
+4. `$HOME/rbackup-ui/rbackup.sh`
 5. `$HOME/rbackup/rbackup.sh`（旧布局，保持兼容）
 6. `$HOME/.local/bin/rbackup`
 7. `$HOME/.local/bin/rbackup.sh`
 8. `PATH` 中的 `rbackup.sh` / `rbackup`
 
 配置路径查找顺序：`-c` / `--config` → `RBACKUP_CONFIG` →
-`$XDG_CONFIG_HOME/rbackup-tui/config.ini`（默认 `~/.config/rbackup-tui/config.ini`）→
-`$HOME/rbackup-tui/config.ini`（过渡兼容）→ `$HOME/rbackup/config.ini`（更旧布局）。
+`$XDG_CONFIG_HOME/rbackup-ui/config.ini`（默认 `~/.config/rbackup-ui/config.ini`）→
+`$HOME/rbackup-ui/config.ini`（过渡兼容）→ `$HOME/rbackup/config.ini`（更旧布局）。
 
 全找不到时报错退出，提示用 `-s` 或 `RBACKUP_SCRIPT` 指定。
 
@@ -613,14 +613,14 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 ### 启动
 
     # 本机使用（默认只监听 127.0.0.1:8080）
-    rbackup-tui --web
+    rbackup-ui --web
 
     # 只要出现任一 --web-* 选项就会自动启用 Web 模式（--web 可省略）
-    rbackup-tui --web-token-file /etc/rbackup-tui/web.token
+    rbackup-ui --web-token-file /etc/rbackup-ui/web.token
 
     # 常驻服务（推荐：绑 loopback，由 Tailscale/WireGuard 或反代对外）
-    openssl rand -base64 32 > /etc/rbackup-tui/web.token && chmod 600 /etc/rbackup-tui/web.token
-    rbackup-tui --web --web-addr 127.0.0.1:8080 --web-token-file /etc/rbackup-tui/web.token
+    openssl rand -base64 32 > /etc/rbackup-ui/web.token && chmod 600 /etc/rbackup-ui/web.token
+    rbackup-ui --web --web-addr 127.0.0.1:8080 --web-token-file /etc/rbackup-ui/web.token
 
 ### 参数
 
@@ -649,20 +649,20 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 
 ```bash
 # ① 生成密码哈希（交互输入密码，不回显）
-rbackup-tui --web-hash-password > ~/.config/rbackup-tui/web.passwd
-chmod 600 ~/.config/rbackup-tui/web.passwd
+rbackup-ui --web-hash-password > ~/.config/rbackup-ui/web.passwd
+chmod 600 ~/.config/rbackup-ui/web.passwd
 
 # ② 生成 TOTP secret（用手机 Authenticator 扫码/手录 otpauth URI）
-rbackup-tui --web-gen-totp > /tmp/totp.txt
+rbackup-ui --web-gen-totp > /tmp/totp.txt
 cat /tmp/totp.txt                       # 记录 secret 和 otpauth URI
-sed -n '2p' /tmp/totp.txt > ~/.config/rbackup-tui/web.totp
-chmod 600 ~/.config/rbackup-tui/web.totp && rm -f /tmp/totp.txt
+sed -n '2p' /tmp/totp.txt > ~/.config/rbackup-ui/web.totp
+chmod 600 ~/.config/rbackup-ui/web.totp && rm -f /tmp/totp.txt
 
 # ③ 启动：密码 + TOTP，token 作为恢复方式
-rbackup-tui --web-addr 127.0.0.1:8080 \
-  --web-password-hash-file ~/.config/rbackup-tui/web.passwd \
-  --web-2fa totp --web-totp-secret-file ~/.config/rbackup-tui/web.totp \
-  --web-token-file ~/.config/rbackup-tui/web.token
+rbackup-ui --web-addr 127.0.0.1:8080 \
+  --web-password-hash-file ~/.config/rbackup-ui/web.passwd \
+  --web-2fa totp --web-totp-secret-file ~/.config/rbackup-ui/web.totp \
+  --web-token-file ~/.config/rbackup-ui/web.token
 ```
 
 - 密码哈希用 PBKDF2-HMAC-SHA256（60 万次迭代 + 随机盐），不存明文；
@@ -701,12 +701,12 @@ rbackup-tui --web-addr 127.0.0.1:8080 \
 VPN 已把流量加密，可直接绑 VPN 地址 + token（不需要额外 TLS，但要显式允许明文）：
 
     # 生成并保存 token
-    mkdir -p ~/.config/rbackup-tui
-    openssl rand -base64 32 > ~/.config/rbackup-tui/web.token
-    chmod 600 ~/.config/rbackup-tui/web.token
+    mkdir -p ~/.config/rbackup-ui
+    openssl rand -base64 32 > ~/.config/rbackup-ui/web.token
+    chmod 600 ~/.config/rbackup-ui/web.token
 
     # 绑到 VPN 网卡地址（示例 10.14.10.5，换成你自己的）
-    rbackup-tui --web-addr 10.14.10.5:8080       --web-token-file ~/.config/rbackup-tui/web.token       --web-insecure-http
+    rbackup-ui --web-addr 10.14.10.5:8080       --web-token-file ~/.config/rbackup-ui/web.token       --web-insecure-http
 
 手机连上 VPN 后访问 `http://10.14.10.5:8080`，输入 token 即可。
 （`--web-insecure-http` 只在这类已加密的私有网络里使用。）
@@ -726,9 +726,9 @@ Nginx/Caddy 反代到 `127.0.0.1:8080`，SSE 需关闭缓冲：
 
     openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
       -keyout web.key -out web.crt -subj "/CN=10.14.10.5"
-    rbackup-tui --web-addr 10.14.10.5:8443 \
+    rbackup-ui --web-addr 10.14.10.5:8443 \
       --web-tls-cert web.crt --web-tls-key web.key \
-      --web-token-file ~/.config/rbackup-tui/web.token
+      --web-token-file ~/.config/rbackup-ui/web.token
 
 手机首次访问需要信任自签证书（或用方式一/二规避证书问题）。
 
@@ -898,15 +898,15 @@ systemd 常驻单元示例见 [docs/WEBUI-DESIGN.md](docs/WEBUI-DESIGN.md) 第 8
 
 日志和统计文件生成在同一个目录，文件名前缀相同，后缀不同：
 
-    $XDG_STATE_HOME/rbackup-tui/log/rbackup_20260928_1922.log      完整日志
-    $XDG_STATE_HOME/rbackup-tui/log/rbackup_20260928_1922.stats    统计报告
+    $XDG_STATE_HOME/rbackup-ui/log/rbackup_20260928_1922.log      完整日志
+    $XDG_STATE_HOME/rbackup-ui/log/rbackup_20260928_1922.stats    统计报告
 
-日志目录按以下顺序解析（`rbackup-tui` 采用同一套规则，否则它找不到 `.stats`）：
+日志目录按以下顺序解析（`rbackup-ui` 采用同一套规则，否则它找不到 `.stats`）：
 
 1. `config.ini` 里的 `LOG_DIR`（显式指定，优先级最高）
 2. 平台默认目录：
-   - Linux / macOS：`$XDG_STATE_HOME/rbackup-tui/log`，未设置时为 `~/.local/state/rbackup-tui/log`
-   - Windows：`%LOCALAPPDATA%\rbackup-tui\Logs`
+   - Linux / macOS：`$XDG_STATE_HOME/rbackup-ui/log`，未设置时为 `~/.local/state/rbackup-ui/log`
+   - Windows：`%LOCALAPPDATA%\rbackup-ui\Logs`
 3. `<rbackup.sh 所在目录>/log`（旧行为，最后兜底）
 
 文件名带时分（YYYYMMDD_HHMM），同一分钟内多次运行会覆盖同名文件。
@@ -1103,8 +1103,8 @@ rbackup.sh 日志文件中的对应输出格式一致（字段顺序：文件 �
 ### 产物位置
 
     bin/
-    ├── windows/rbackup-tui.exe
-    └── linux/rbackup-tui
+    ├── windows/rbackup-ui.exe
+    └── linux/rbackup-ui
 
 ### 版本注入
 
@@ -1128,14 +1128,14 @@ Makefile 会自动注入版本：
 
 生成三个压缩包到 `dist/`：
 
-    rbackup-tui-vX.Y.Z-linux-amd64.tar.gz
-    rbackup-tui-vX.Y.Z-linux-arm64.tar.gz
-    rbackup-tui-vX.Y.Z-windows-amd64.zip
+    rbackup-ui-vX.Y.Z-linux-amd64.tar.gz
+    rbackup-ui-vX.Y.Z-linux-arm64.tar.gz
+    rbackup-ui-vX.Y.Z-windows-amd64.zip
 
 每个压缩包内含：
 
-    rbackup-tui-<平台>/
-    ├── rbackup-tui (或 .exe)
+    rbackup-ui-<平台>/
+    ├── rbackup-ui (或 .exe)
     ├── rbackup.sh
     ├── config1.ini.example
     ├── config2.ini.example
@@ -1172,9 +1172,9 @@ Makefile 会自动注入版本：
 就是懒人模式入口，两者永远同版本。
 
     dist/
-    ├── rbackup-tui-vX.Y.Z-linux-amd64.tar.gz
-    ├── rbackup-tui-vX.Y.Z-linux-arm64.tar.gz
-    ├── rbackup-tui-vX.Y.Z-windows-amd64.zip
+    ├── rbackup-ui-vX.Y.Z-linux-amd64.tar.gz
+    ├── rbackup-ui-vX.Y.Z-linux-arm64.tar.gz
+    ├── rbackup-ui-vX.Y.Z-windows-amd64.zip
     ├── install.sh
     ├── SHA256SUMS
     └── RELEASE_NOTES.md
@@ -1241,7 +1241,7 @@ MSYS2 mintty 会重复分发事件。代码内置 50ms 去重。
 
 MSYS2 + winpty 会吞掉 ESC。使用 q 或 Ctrl+C。
 
-### Linux 下 rbackup-tui 找不到 bash？
+### Linux 下 rbackup-ui 找不到 bash？
 
 设置 RBACKUP_BASH=/bin/bash，或在 config.ini 中确认 SSH_KEY 等路径正确。
 
@@ -1298,7 +1298,7 @@ MSYS2 + winpty 会吞掉 ESC。使用 q 或 Ctrl+C。
 
 ## 文件结构
 
-    rbackup-tui/
+    rbackup-ui/
     ├── main.go                  TUI 主程序
     ├── config.go                配置解析
     ├── runner.go                执行 rbackup.sh

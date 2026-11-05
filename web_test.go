@@ -474,7 +474,7 @@ func TestParseCLIWebFlags(t *testing.T) {
 
 	// 只给 --web-token-file（没有 --web）也应自动进入 Web 模式
 	reset()
-	if _, _, err := parseCLI([]string{"rbackup-tui", "--web-token-file", "/tmp/web.token", "--web-addr", "127.0.0.1:9999"}); err != nil {
+	if _, _, err := parseCLI([]string{"rbackup-ui", "--web-token-file", "/tmp/web.token", "--web-addr", "127.0.0.1:9999"}); err != nil {
 		t.Fatalf("parseCLI: %v", err)
 	}
 	if !webMode {
@@ -486,29 +486,29 @@ func TestParseCLIWebFlags(t *testing.T) {
 
 	// 缺值必须报错（而不是静默忽略）
 	reset()
-	if _, _, err := parseCLI([]string{"rbackup-tui", "--web-token-file"}); err == nil {
+	if _, _, err := parseCLI([]string{"rbackup-ui", "--web-token-file"}); err == nil {
 		t.Fatal("--web-token-file 缺值应报错")
 	}
 	reset()
-	if _, _, err := parseCLI([]string{"rbackup-tui", "--web-addr"}); err == nil {
+	if _, _, err := parseCLI([]string{"rbackup-ui", "--web-addr"}); err == nil {
 		t.Fatal("--web-addr 缺值应报错")
 	}
 
 	// -c/-s 缺值同样报错
 	reset()
-	if _, _, err := parseCLI([]string{"rbackup-tui", "-c"}); err == nil {
+	if _, _, err := parseCLI([]string{"rbackup-ui", "-c"}); err == nil {
 		t.Fatal("-c 缺值应报错")
 	}
 
 	// 仅 --web 仍可用
 	reset()
-	if _, _, err := parseCLI([]string{"rbackup-tui", "--web"}); err != nil || !webMode {
+	if _, _, err := parseCLI([]string{"rbackup-ui", "--web"}); err != nil || !webMode {
 		t.Fatalf("--web 解析失败: err=%v mode=%v", err, webMode)
 	}
 
 	// 非 web 参数不应误启用
 	reset()
-	if _, _, err := parseCLI([]string{"rbackup-tui", "-c", "/tmp/x.ini"}); err != nil || webMode {
+	if _, _, err := parseCLI([]string{"rbackup-ui", "-c", "/tmp/x.ini"}); err != nil || webMode {
 		t.Fatalf("普通参数不应启用 web: err=%v mode=%v", err, webMode)
 	}
 }
@@ -711,7 +711,7 @@ func TestParseCLIAuthFlags(t *testing.T) {
 	webMode = false
 	webOpts = defaultWebOptions()
 
-	if _, _, err := parseCLI([]string{"rbackup-tui",
+	if _, _, err := parseCLI([]string{"rbackup-ui",
 		"--web-user", "alice",
 		"--web-password-hash-file", "/tmp/pw",
 		"--web-2fa", "totp",
@@ -726,7 +726,7 @@ func TestParseCLIAuthFlags(t *testing.T) {
 	// 缺值必须报错
 	webMode = false
 	webOpts = defaultWebOptions()
-	if _, _, err := parseCLI([]string{"rbackup-tui", "--web-2fa"}); err == nil {
+	if _, _, err := parseCLI([]string{"rbackup-ui", "--web-2fa"}); err == nil {
 		t.Fatal("--web-2fa 缺值应报错")
 	}
 }

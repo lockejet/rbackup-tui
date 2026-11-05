@@ -1,8 +1,8 @@
 # ============================================================
-# rbackup-tui Makefile
+# rbackup-ui Makefile
 # ============================================================
 
-BIN        := rbackup-tui
+BIN        := rbackup-ui
 BUILD_DIR  := bin
 DIST_DIR   := dist
 STAGE_DIR  := .staging
@@ -20,7 +20,7 @@ DOC_FILES    := README.md LICENSE
 BUILD_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 VERSION      ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo dev)
 PKG_VERSION  ?= $(VERSION)
-PKG_NAME     := rbackup-tui-$(PKG_VERSION)
+PKG_NAME     := rbackup-ui-$(PKG_VERSION)
 
 LDFLAGS := -X main.Version=$(BUILD_VERSION) \
            -X main.BuildTime=$(shell date +%Y-%m-%d) \
@@ -326,14 +326,14 @@ install-files:
 .PHONY: install install-user
 install install-user: build install-files
 	@echo ">>> 安装完成（用户级）: $(DESTDIR)$(BINDIR)/$(BIN)$(SUFFIX)"
-	@echo ">>> 配置目录: $(HOME)/rbackup-tui/"
+	@echo ">>> 配置目录: $(HOME)/rbackup-ui/"
 
 .PHONY: install-system
 install-system: build
 	@echo ">>> 系统级安装到 /usr/local/bin（需要 sudo 权限）"
 	@$(MAKE) --no-print-directory install-files SUDO=sudo BINDIR=/usr/local/bin
 	@echo ">>> 安装完成（系统级）"
-	@echo ">>> 配置仍按每个用户: ~/rbackup-tui/config.ini"
+	@echo ">>> 配置仍按每个用户: ~/rbackup-ui/config.ini"
 
 # ---------- 克隆模式：下载预编译包，全程不调用 go ----------
 .PHONY: install-prebuilt
@@ -362,7 +362,7 @@ install-lazy:
 uninstall:
 	@user_manifest="$(HOME)/.local/share/$(BIN)/install-manifest.txt"; \
 	sys_manifest="/usr/local/share/$(BIN)/install-manifest.txt"; \
-	legacy_manifest="$(HOME)/rbackup-tui/install-manifest.txt"; \
+	legacy_manifest="$(HOME)/rbackup-ui/install-manifest.txt"; \
 	if [ -f "$$sys_manifest" ] && [ "$$(id -u)" -eq 0 ]; then \
 		echo ">>> 卸载系统级安装（按安装清单）"; \
 		bash ./install.sh --system --uninstall; \
@@ -408,7 +408,7 @@ version:
 
 .PHONY: help
 help:
-	@echo "rbackup-tui 构建、打包、安装"
+	@echo "rbackup-ui 构建、打包、安装"
 	@echo ""
 	@echo "安装 —— 三种模式:"
 	@echo "  [懒人模式] 无源码、无 Go："

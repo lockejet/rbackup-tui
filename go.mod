@@ -1,4 +1,4 @@
-module rbackup-tui
+module rbackup-ui
 
 go 1.27.1
 

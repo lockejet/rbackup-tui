@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生成 rbackup-tui 的界面示意图。
+"""生成 rbackup-ui 的界面示意图。
 
 一份网格数据，两个产物：
   1. docs/images/ui-overview.svg  —— 几何边框 + 文本，SVG 矢量图（README 用）
@@ -27,7 +27,7 @@ PAD = 14            # 外边距
 FONT_SIZE = 15.0
 FONT_STACK = ('ui-monospace,SFMono-Regular,Menlo,Consolas,'
               '"Noto Sans Mono CJK SC","Noto Sans CJK SC","DejaVu Sans Mono",monospace')
-ARIA_LABEL = "rbackup-tui 界面示意图"
+ARIA_LABEL = "rbackup-ui 界面示意图"
 
 # ---------- 配色 ----------
 C = {
@@ -66,14 +66,14 @@ ROWS = [
 
     {"t": "flow", "segs": [
         ("脚本: ", "label"), ("~/.local/bin/rbackup.sh", "val"),
-        ("   配置: ", "label"), ("~/.config/rbackup-tui/config.ini", "val")]},
+        ("   配置: ", "label"), ("~/.config/rbackup-ui/config.ini", "val")]},
     {"t": "flow", "segs": [
         ("远端: ", "label"), ("admin@example.com:22", "val"),
         ("   策略: ", "label"), ("skip", "ok"), ("（门禁失败时跳过）", "dim")]},
     {"t": "flow", "segs": [
-        ("日志: ", "label"), ("~/.local/state/rbackup-tui/log/20260928_1922.log", "val")]},
+        ("日志: ", "label"), ("~/.local/state/rbackup-ui/log/20260928_1922.log", "val")]},
     {"t": "flow", "segs": [
-        ("统计: ", "label"), ("~/.local/state/rbackup-tui/log/20260928_1922.stats", "val")]},
+        ("统计: ", "label"), ("~/.local/state/rbackup-ui/log/20260928_1922.stats", "val")]},
 
     {"t": "sep", "title": "[2] 任务列表"},
 

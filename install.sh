@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ============================================================
-# rbackup-tui 懒人安装器
+# rbackup-ui 懒人安装器
 #
-#   curl -fsSL https://github.com/lockejet/rbackup-tui/releases/latest/download/install.sh | bash
+#   curl -fsSL https://github.com/lockejet/rbackup-ui/releases/latest/download/install.sh | bash
 #   curl -fsSL .../install.sh | sudo bash -s -- --system
 #
 # 不需要源码、不需要 Go。下载 Release 预编译包 → 校验 SHA256 → 安装。
@@ -11,9 +11,9 @@
 set -euo pipefail
 
 # ---------- 默认值 ----------
-BIN_NAME="rbackup-tui"
+BIN_NAME="rbackup-ui"
 SCRIPT_NAME="rbackup.sh"
-REPO="${RBACKUP_REPO:-lockejet/rbackup-tui}"
+REPO="${RBACKUP_REPO:-lockejet/rbackup-ui}"
 VERSION="latest"
 MODE="user"          # user | system
 PREFIX=""            # 空 = 按 MODE 推导
@@ -38,7 +38,7 @@ die()   { printf '%s\n' "${C_RED}✗ $*${C_OFF}" >&2; exit 1; }
 
 usage() {
     cat >&2 <<EOF
-rbackup-tui 安装器
+rbackup-ui 安装器
 
 用法:
   install.sh [选项]
@@ -119,7 +119,7 @@ fi
 if [ -z "$PREFIX" ]; then
     if [ "$OS" = "windows" ]; then
         if [ "$MODE" = "system" ]; then
-            PREFIX="${LOCALAPPDATA:-$HOME/AppData/Local}/Programs/rbackup-tui"
+            PREFIX="${LOCALAPPDATA:-$HOME/AppData/Local}/Programs/rbackup-ui"
         else
             PREFIX="$HOME/.local"
         fi
@@ -145,6 +145,8 @@ else
     DATADIR="$SHAREDIR"
 fi
 MANIFEST="$DATADIR/install-manifest.txt"
+# 改名兼容：旧版 rbackup-tui 的安装清单与配置位置
+LEGACY_MANIFEST="${DATADIR%/*}/rbackup-tui/install-manifest.txt"
 
 # 配置目录：程序用 os.UserConfigDir() 解析（Linux $XDG_CONFIG_HOME 或 ~/.config，
 # Windows %AppData%），这里复刻同一规则，保证安装器写的位置程序读得到。
@@ -307,6 +309,10 @@ read_installed_version() {
 
 # ---------- 卸载 ----------
 if [ "$DO_UNINSTALL" -eq 1 ]; then
+    if [ ! -f "$MANIFEST" ] && [ -f "$LEGACY_MANIFEST" ]; then
+        warn "未找到 $BIN_NAME 清单，检测到改名前的 rbackup-tui 清单，按旧清单卸载"
+        MANIFEST="$LEGACY_MANIFEST"
+    fi
     [ -f "$MANIFEST" ] || die "找不到安装清单：$MANIFEST（可能是源码安装，请用 make uninstall）"
     info "按清单卸载（版本 $(read_installed_version)）"
     removed=0
@@ -350,9 +356,9 @@ if [ -n "$FROM" ]; then
     PKG_PATH="$FROM"
     info "使用本地包 $FROM"
     if [ "$VERSION" = "latest" ]; then
-        # 从包名反推版本：rbackup-tui-<ver>-<os>-<arch>.tar.gz|zip
+        # 从包名反推版本：rbackup-ui-<ver>-<os>-<arch>.tar.gz|zip
         VERSION="$(basename "$FROM" | sed -n \
-            's/^rbackup-tui-\(.*\)-\(linux\|windows\)-\(amd64\|arm64\)\.\(tar\.gz\|zip\)$/\1/p')"
+            's/^rbackup-ui-\(.*\)-\(linux\|windows\)-\(amd64\|arm64\)\.\(tar\.gz\|zip\)$/\1/p')"
         [ -n "$VERSION" ] || VERSION="local"
     fi
     info "版本: $VERSION"
@@ -372,7 +378,7 @@ else
     if [ "$DOWNLOAD_FAILED" -eq 1 ]; then
         if [ -n "$GH_TOKEN" ]; then
             die "下载失败：$BASE_URL/$PKG_NAME（请确认该版本存在此平台资产）"
-        elif [ "$REPO" = "lockejet/rbackup-tui" ]; then
+        elif [ "$REPO" = "lockejet/rbackup-ui" ]; then
             die "下载失败：$BASE_URL/$PKG_NAME
     若仓库尚未公开，请设置 GH_TOKEN，例如：
       GH_TOKEN=\$(gh auth token) curl -fsSL ... | bash"
@@ -493,6 +499,13 @@ if [ "$DO_CONFIG" -eq 1 ]; then
         if [ -n "$CONFIG_OWNER" ]; then
             chown "$CONFIG_OWNER" "$CONFIGDIR" 2>/dev/null || true
         fi
+        # 改名兼容：新配置不存在时，尝试从旧 rbackup-tui 配置复制一份
+        LEGACY_CONFIG="${CONFIGDIR%/*}/rbackup-tui/config.ini"
+        if [ ! -f "$CONFIG_PATH" ] && [ -f "$LEGACY_CONFIG" ]; then
+            install -m 0644 "$LEGACY_CONFIG" "$CONFIG_PATH"
+            [ -n "$CONFIG_OWNER" ] && chown "$CONFIG_OWNER" "$CONFIG_PATH" 2>/dev/null || true
+            warn "已从旧配置复制：$LEGACY_CONFIG -> $CONFIG_PATH（请确认内容）"
+        fi
         if [ ! -f "$CONFIG_PATH" ]; then
             if [ -f "$DATADIR/examples/config2.ini.example" ]; then
                 install -m 0644 "$DATADIR/examples/config2.ini.example" "$CONFIG_PATH"
@@ -509,7 +522,7 @@ fi
 
 # ---------- 安装清单 ----------
 {
-    printf '# rbackup-tui install manifest\n'
+    printf '# rbackup-ui install manifest\n'
     printf '# version=%s\n' "$VERSION"
     printf '# mode=%s\n' "$MODE"
     printf '# date=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"

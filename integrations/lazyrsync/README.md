@@ -19,7 +19,7 @@ TUI 预览(dry-run)、无头运行三条路径全部经由 `rsync::binary()` 取
 **第一步**，`~/.config/lazyrsync/settings.toml`：
 
 ```toml
-rsync_path = "/path/to/rbackup-tui/integrations/lazyrsync/rbackup-gate.sh"
+rsync_path = "/path/to/rbackup-ui/integrations/lazyrsync/rbackup-gate.sh"
 ```
 
 **第二步**，给需要门禁的任务在 `profiles.toml` 里加一个任务名标记（就是你
@@ -27,7 +27,7 @@ rsync_path = "/path/to/rbackup-tui/integrations/lazyrsync/rbackup-gate.sh"
 
 ```toml
 [profile.task.advanced]
-raw_args = "--rbackup-task=alice --rbackup-config=/path/to/rbackup-tui/config.ini"
+raw_args = "--rbackup-task=alice --rbackup-config=/path/to/rbackup-ui/config.ini"
 ```
 
 **第三步**（可选），`settings.toml` 里没有的位置用环境变量：

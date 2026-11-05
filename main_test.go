@@ -8,20 +8,20 @@ import (
 	"testing"
 )
 
-// TestAppLogDirWindows 验证 Windows 下的日志目录：%LOCALAPPDATA%\rbackup-tui\Logs
+// TestAppLogDirWindows 验证 Windows 下的日志目录：%LOCALAPPDATA%\rbackup-ui\Logs
 func TestAppLogDirWindows(t *testing.T) {
 	base := `C:\Users\tester\AppData\Local`
 	t.Setenv("LOCALAPPDATA", base)
 
 	got := appLogDir("windows")
-	want := filepath.Join(base, "rbackup-tui", "Logs")
+	want := filepath.Join(base, "rbackup-ui", "Logs")
 	if got != want {
 		t.Fatalf("appLogDir(windows) = %q, want %q", got, want)
 	}
 }
 
 // TestAppLogDirWindowsNoLocalAppData 验证 LOCALAPPDATA 缺失时的回退：
-// %USERPROFILE%\AppData\Local\rbackup-tui\Logs
+// %USERPROFILE%\AppData\Local\rbackup-ui\Logs
 func TestAppLogDirWindowsNoLocalAppData(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("LOCALAPPDATA", "")
@@ -29,7 +29,7 @@ func TestAppLogDirWindowsNoLocalAppData(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 
 	got := appLogDir("windows")
-	want := filepath.Join(home, "AppData", "Local", "rbackup-tui", "Logs")
+	want := filepath.Join(home, "AppData", "Local", "rbackup-ui", "Logs")
 	if got != want {
 		t.Fatalf("appLogDir(windows, no LOCALAPPDATA) = %q, want %q", got, want)
 	}
@@ -41,7 +41,7 @@ func TestAppLogDirUnixXDG(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", state)
 
 	got := appLogDir("linux")
-	want := filepath.Join(state, "rbackup-tui", "log")
+	want := filepath.Join(state, "rbackup-ui", "log")
 	if got != want {
 		t.Fatalf("appLogDir(linux) = %q, want %q", got, want)
 	}
@@ -56,7 +56,7 @@ func TestAppLogDirUnixFallback(t *testing.T) {
 	for _, xdg := range []string{"", "relative/state"} {
 		t.Setenv("XDG_STATE_HOME", xdg)
 		got := appLogDir("linux")
-		want := filepath.Join(home, ".local", "state", "rbackup-tui", "log")
+		want := filepath.Join(home, ".local", "state", "rbackup-ui", "log")
 		if got != want {
 			t.Fatalf("appLogDir(linux, XDG_STATE_HOME=%q) = %q, want %q", xdg, got, want)
 		}
@@ -66,8 +66,8 @@ func TestAppLogDirUnixFallback(t *testing.T) {
 // TestDefaultLogDir 验证默认日志目录与 appLogDir 一致（TUI 与 rbackup.sh 的约定）。
 func TestDefaultLogDir(t *testing.T) {
 	got := defaultLogDir()
-	if !strings.Contains(got, "rbackup-tui") {
-		t.Fatalf("defaultLogDir() = %q, 应包含 rbackup-tui", got)
+	if !strings.Contains(got, "rbackup-ui") {
+		t.Fatalf("defaultLogDir() = %q, 应包含 rbackup-ui", got)
 	}
 	if got != appLogDir(runtime.GOOS) {
 		t.Fatalf("defaultLogDir() = %q, want %q", got, appLogDir(runtime.GOOS))
@@ -97,7 +97,7 @@ func TestResolveLogDirIgnoresEmptyConfig(t *testing.T) {
 	if got == "" {
 		t.Fatal("resolveLogDir 不应返回空路径")
 	}
-	if !strings.Contains(got, "rbackup-tui") {
+	if !strings.Contains(got, "rbackup-ui") {
 		t.Fatalf("resolveLogDir 应回退到应用日志目录，got %q", got)
 	}
 }

@@ -159,7 +159,7 @@ func (o *webOptions) validate() error {
 	if !loop {
 		if !hasCred {
 			return errors.New("监听非 loopback 地址必须提供 token 或密码（推荐 --web-token-file），已拒绝启动。\n" +
-				"生成 token：openssl rand -base64 32 > /etc/rbackup-tui/web.token && chmod 600 /etc/rbackup-tui/web.token")
+				"生成 token：openssl rand -base64 32 > /etc/rbackup-ui/web.token && chmod 600 /etc/rbackup-ui/web.token")
 		}
 		if o.TLSCert == "" && !o.InsecureHTTP {
 			return errors.New("监听非 loopback 地址必须启用 TLS（--web-tls-cert/--web-tls-key），" +
@@ -1592,7 +1592,7 @@ func (s *webServer) serve() error {
 	if host == "" {
 		host = "0.0.0.0"
 	}
-	fmt.Fprintf(os.Stderr, "rbackup-tui web UI: %s://%s:%s  (配置: %s)\n", scheme, host, port, s.configPath)
+	fmt.Fprintf(os.Stderr, "rbackup-ui web UI: %s://%s:%s  (配置: %s)\n", scheme, host, port, s.configPath)
 	switch {
 	case s.totpEnabled:
 		fmt.Fprintln(os.Stderr, "认证: 密码 + TOTP 二次验证（token 登录可作为恢复方式）")

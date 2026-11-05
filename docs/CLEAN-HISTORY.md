@@ -27,7 +27,7 @@
 ## 前置检查（可复现）
 
 ```bash
-cd ~/rbackup-tui
+cd ~/rbackup-ui
 
 # ① 历史里的内网地址（形如 192.0.2.10 / 192.0.2.10:2222）
 git log --all -p | grep -oE '192\.168\.[0-9]{1,3}\.[0-9]{1,3}(:[0-9]+)?' | sort | uniq -c
@@ -56,7 +56,7 @@ git log --all --pretty=format: --name-only | sed '/^$/d' | sort -u
 | 内网信息 | **有**：内网地址若干处，命中 `README.md`、`config.go`、`rbackup.sh`、`config2.ini.example` |
 | 本机密钥路径 | **有**：`/home/<user>/.ssh/id_ed25519` 及其变体若干处（只有路径，无密钥内容） |
 | 真实配置 / 日志 / 私有脚本 | **没有**：`config-*.ini`、`rbackup.d/`、`log/`、`bin/`、`dist/`、`backup/`、`.staging/` **从未被提交** |
-| 二进制残留 | **有**：历史中的 `rbackup-tui`（约 4.93 MB，初始化提交引入、下一次提交删除） |
+| 二进制残留 | **有**：历史中的 `rbackup-ui`（约 4.93 MB，初始化提交引入、下一次提交删除） |
 | 当前 HEAD 泄露 | 本文件旧版本含真实内网地址与用户名（已脱敏）；其余跟踪文件无命中 |
 
 结论：需要重写历史的只有 **4 个文本文件的内容 + 1 个二进制路径**。
@@ -69,16 +69,16 @@ git log --all --pretty=format: --name-only | sed '/^$/d' | sort -u
 `filter-repo` 会重写 refs 并重置工作区，未提交的改动会丢。
 
 ```bash
-cd ~/rbackup-tui
+cd ~/rbackup-ui
 git status --short        # 必须无输出；有改动先提交
 
 # ① 远端镜像（含全部历史与 tag）——唯一的回滚手段
-git clone --mirror git@github.com:lockejet/rbackup-tui.git \
-    ~/rbackup-tui-backup-$(date +%F).git
+git clone --mirror git@github.com:lockejet/rbackup-ui.git \
+    ~/rbackup-ui-backup-$(date +%F).git
 
 # ② 记录清理前的 refs 指纹，便于事后比对
-git tag -l --format='%(refname:short) %(objectname)' > ~/rbackup-tui-tags-before.txt
-git rev-parse HEAD >> ~/rbackup-tui-tags-before.txt
+git tag -l --format='%(refname:short) %(objectname)' > ~/rbackup-ui-tags-before.txt
+git rev-parse HEAD >> ~/rbackup-ui-tags-before.txt
 ```
 
 > **不要**在这里用 `filter-repo --invert-paths --path README.md` 之类的做法：
@@ -90,8 +90,8 @@ git rev-parse HEAD >> ~/rbackup-tui-tags-before.txt
 ### 2.1 先删除二进制路径
 
 ```bash
-cd ~/rbackup-tui
-git filter-repo --force --invert-paths --path rbackup-tui
+cd ~/rbackup-ui
+git filter-repo --force --invert-paths --path rbackup-ui
 ```
 
 ### 2.2 再替换文件内容里的敏感字符串
@@ -120,7 +120,7 @@ git filter-repo --force --replace-text ~/rbackup-cleanup-2026-10-31/metadata/red
 git log --all -p | grep -nE '192\.168\.|/home/[^/ ]+/\.ssh/|BEGIN [A-Z ]*PRIVATE KEY'
 
 # ② 二进制不应再出现在任何提交里（应无输出）
-git log --all --pretty=format: --name-only | sort -u | grep -x 'rbackup-tui' || echo "✓ 二进制已清除"
+git log --all --pretty=format: --name-only | sort -u | grep -x 'rbackup-ui' || echo "✓ 二进制已清除"
 
 # ③ 保留文件仍在（应全部存在）
 git log --all --pretty=format: --name-only | sort -u \
@@ -141,7 +141,7 @@ git tag -l
 > `git push origin :refs/tags/vX.Y.Z && git push origin refs/tags/vX.Y.Z`
 
 ```bash
-git remote add origin git@github.com:lockejet/rbackup-tui.git
+git remote add origin git@github.com:lockejet/rbackup-ui.git
 git push --force --all     # 先分支
 git push --force --tags    # 再 tag（会触发 Release workflow）
 ```
@@ -149,10 +149,10 @@ git push --force --tags    # 再 tag（会触发 Release workflow）
 推送后逐个确认 Release 仍正常（附件独立于 git 历史，通常不受影响，但 tag 的 SHA 变了）：
 
 ```bash
-gh release list --repo lockejet/rbackup-tui
+gh release list --repo lockejet/rbackup-ui
 for t in $(git tag -l); do
     printf '%-8s ' "$t"
-    gh release view "$t" --repo lockejet/rbackup-tui --json assets \
+    gh release view "$t" --repo lockejet/rbackup-ui --json assets \
         --jq '.assets | length' 2>/dev/null || echo "无 Release"
 done
 ```
@@ -174,8 +174,8 @@ done
 用第 1 步的镜像恢复远端：
 
 ```bash
-cd ~/rbackup-cleanup-2026-10-31/backups/rbackup-tui-mirror-backup-*.git
-git push --mirror git@github.com:lockejet/rbackup-tui.git
+cd ~/rbackup-cleanup-2026-10-31/backups/rbackup-ui-mirror-backup-*.git
+git push --mirror git@github.com:lockejet/rbackup-ui.git
 ```
 
 ## 影响与代价
@@ -195,11 +195,11 @@ git push --mirror git@github.com:lockejet/rbackup-tui.git
 ### 做了什么
 
 1. **备份**（均在仓库外）：
-   - 远端全量镜像：`~/rbackup-cleanup-2026-10-31/backups/rbackup-tui-mirror-backup-YYYY-MM-DD.git`（31 个提交、11 个 tag）
+   - 远端全量镜像：`~/rbackup-cleanup-2026-10-31/backups/rbackup-ui-mirror-backup-YYYY-MM-DD.git`（31 个提交、11 个 tag）
    - 九个 Release 的资产：`~/rbackup-cleanup-2026-10-31/backups/rbackup-release-backup/`（v1.1.1–v1.1.9，约 75 MB）
    - 清理前的 refs 指纹：`~/rbackup-cleanup-2026-10-31/metadata/refs-before.txt`
 2. **在独立副本上重写**（原仓库保持不动，校验通过后才推送）：
-   - pass 1：`git filter-repo --force --invert-paths --path rbackup-tui`
+   - pass 1：`git filter-repo --force --invert-paths --path rbackup-ui`
      （移除历史中 4.93 MB 的二进制）
    - pass 2：`git filter-repo --force --replace-text ~/rbackup-cleanup-2026-10-31/metadata/redact-text.txt`
      - `regex:192\.168\.\d+\.\d+(:\d+)?` → `192.0.2.10`
@@ -211,7 +211,7 @@ git push --mirror git@github.com:lockejet/rbackup-tui.git
    （先分支后 tag）。推送后 CI 在重写后的 main 上通过。
 4. **校验**（匿名全新 clone）：
    - `git log --all -p | grep -E '192\.168\.|/home/[^/ ]+/\.ssh/|/home/<user>'` → 零命中
-   - 历史文件清单无 `rbackup-tui`；tag 11 个；HEAD tree 与重写前一致
+   - 历史文件清单无 `rbackup-ui`；tag 11 个；HEAD tree 与重写前一致
    - 线上 Release 资产未被重建（强推 tag 不触发 push 工作流），下载校验和仍全部通过
 5. **旧 Release 资产修复**（2026-10-31 晚）：
    - 发现 v1.1.2–v1.1.5 的 12 个资产内 `README.md` / `config2.ini.example` 含
@@ -276,4 +276,4 @@ git push --mirror git@github.com:lockejet/rbackup-tui.git
   强推后没有产生新的 run），因此历史 Release 资产保持原样。
 - 旧 tag 强推后，所有人的本地副本都需要 `git fetch --force --tags` 或重新 clone。
 - 2026-11-01 重建仓库后，本地仓库的 `origin` 已指向同名新仓库，`git pull/fetch` 正常；
-  原旧对象只保留在本地镜像备份 `backups/rbackup-tui-mirror-backup-2026-10-31.git` 中。
+  原旧对象只保留在本地镜像备份 `backups/rbackup-ui-mirror-backup-2026-10-31.git` 中。

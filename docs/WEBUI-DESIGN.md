@@ -1,4 +1,4 @@
-# rbackup-tui Web UI 设计方案
+# rbackup-ui Web UI 设计方案
 
 > 状态：**已实现（2026-11-05）**，随 **v1.1.10** 发布；本文档保留为设计依据与实现说明。
 >
@@ -6,7 +6,7 @@
 > **C TOTP 二次验证（可选）**，详见文末「15. 实现补充」。
 >
 > 实现文件：`web.go`、`web/{index.html,style.css,app.js}`、`web_test.go`、`proc_{unix,windows}.go`；
-> 入口：`rbackup-tui --web`。
+> 入口：`rbackup-ui --web`。
 > 决策依据（2026-11-05）：远程/手机访问 **要**；历史日志浏览 **先不做**；
 > Web 端改配置 **不允许**；挂载检查 **手动触发**；部署形态 **常驻服务**。
 
@@ -43,7 +43,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ rbackup-tui（单二进制）                                       │
+│ rbackup-ui（单二进制）                                       │
 │                                                              │
 │  main() ──┬── 默认: tview TUI（现有 2100 行，不动）           │
 │           └── --web: Web 模式 ──────────────┐                │
@@ -82,7 +82,7 @@
 
 - **互斥**：`--web` 启动 HTTP 服务，不启动 tview；同一进程不会同时跑两种界面。
 - **代码边界**：MVP 阶段 `web.go` 与 TUI 同在 `package main`；当 Web 功能超过 TUI 一半时，
-  再按 `internal/config`、`internal/runner`、`cmd/rbackup-tui`、`cmd/rbackup-web` 拆分
+  再按 `internal/config`、`internal/runner`、`cmd/rbackup-ui`、`cmd/rbackup-web` 拆分
   （迁移路径写进 v1.2 计划，不在本次实现）。
 
 ---
@@ -95,19 +95,19 @@
 
 ```bash
 # 本机临时用（默认）
-rbackup-tui --web
+rbackup-ui --web
 # → http://127.0.0.1:8080
 
 # 常驻服务（推荐：绑 loopback，由 Tailscale/WireGuard 或反代对外）
-rbackup-tui --web --web-addr 127.0.0.1:8080 --web-token-file /etc/rbackup-tui/web.token
+rbackup-ui --web --web-addr 127.0.0.1:8080 --web-token-file /etc/rbackup-ui/web.token
 
 # 内网直连（必须 token + TLS）
-rbackup-tui --web --web-addr 0.0.0.0:8443 \
-  --web-tls-cert /etc/rbackup-tui/web.crt --web-tls-key /etc/rbackup-tui/web.key \
-  --web-token-file /etc/rbackup-tui/web.token
+rbackup-ui --web --web-addr 0.0.0.0:8443 \
+  --web-tls-cert /etc/rbackup-ui/web.crt --web-tls-key /etc/rbackup-ui/web.key \
+  --web-token-file /etc/rbackup-ui/web.token
 
 # 指定配置/脚本（与 TUI 相同的 -c / -s）
-rbackup-tui --web -c ~/.config/rbackup-tui/config.ini -s ~/.local/bin/rbackup.sh
+rbackup-ui --web -c ~/.config/rbackup-ui/config.ini -s ~/.local/bin/rbackup.sh
 ```
 
 ### 3.2 参数表
@@ -249,9 +249,9 @@ done/canceled/failed 后：保留最近 1 个 job 结果（含日志 ring buffer
 ```json
 {
   "version": "v1.1.10",
-  "config": { "path": "/home/u/.config/rbackup-tui/config.ini", "script": "%h/.local/bin/rbackup.sh",
+  "config": { "path": "/home/u/.config/rbackup-ui/config.ini", "script": "%h/.local/bin/rbackup.sh",
               "host": "example.com", "sshPort": "22", "sshUser": "admin",
-              "policy": "skip", "logDir": "/home/u/.local/state/rbackup-tui/log" },
+              "policy": "skip", "logDir": "/home/u/.local/state/rbackup-ui/log" },
   "readOnly": false,
   "csrf": "b7f3…（与会话绑定，前端写操作时回传）",
   "tasks": [
@@ -318,7 +318,7 @@ data: {"seq":42,"task":"alice","line":"…","stream":"stdout"}
 ```
 桌面：
 ┌─────────────────────────────────────────────────────────────────────┐
-│ rbackup-tui Web    v1.1.10     [配置: …/config.ini]      [退出] [重载] │
+│ rbackup-ui Web    v1.1.10     [配置: …/config.ini]      [退出] [重载] │
 ├─────────────────────────────────────────────────────────────────────┤
 │ 信息区：远端 admin@example.com:22 | 策略 skip | 日志 …/log | 状态: 空闲 │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -374,9 +374,9 @@ data: {"seq":42,"task":"alice","line":"…","stream":"stdout"}
 ### 8.2 常驻服务（systemd 示例）
 
 ```ini
-# /etc/systemd/system/rbackup-tui-web.service
+# /etc/systemd/system/rbackup-ui-web.service
 [Unit]
-Description=rbackup-tui Web UI
+Description=rbackup-ui Web UI
 After=network-online.target
 Wants=network-online.target
 
@@ -385,11 +385,11 @@ Type=simple
 User=admin
 Group=users
 # token 放 0600 文件，避免出现在 ps / unit 文件里
-EnvironmentFile=-/etc/rbackup-tui/web.env        # 可选：RBACKUP_WEB_TOKEN_FILE=...
-ExecStart=%h/.local/bin/rbackup-tui --web \
+EnvironmentFile=-/etc/rbackup-ui/web.env        # 可选：RBACKUP_WEB_TOKEN_FILE=...
+ExecStart=%h/.local/bin/rbackup-ui --web \
   --web-addr 127.0.0.1:8080 \
-  --web-token-file /etc/rbackup-tui/web.token \
-  --web-audit-log %h/.local/state/rbackup-tui/log/web-audit.log
+  --web-token-file /etc/rbackup-ui/web.token \
+  --web-audit-log %h/.local/state/rbackup-ui/log/web-audit.log
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=30
@@ -566,7 +566,7 @@ rbackup.example.com {
 - `--web-user`（默认 `admin`）+ `--web-password-hash-file`；
 - 哈希：PBKDF2-HMAC-SHA256，60 万次迭代，随机 16 字节盐，格式
   `pbkdf2-sha256$<iter>$<saltB64>$<hashB64>`，常数时间比较；
-- 生成：`rbackup-tui --web-hash-password`（无回显交互输入）；
+- 生成：`rbackup-ui --web-hash-password`（无回显交互输入）；
 - 失败计数与登录限速共用（同 IP 10 次/分钟）；
 - token 登录保留，作为忘记密码/认证器时的恢复方式；
 - 非 loopback 下仍要求 TLS（或显式 `--web-insecure-http` + 可信 VPN）。
@@ -577,7 +577,7 @@ rbackup.example.com {
 - 流程：密码校验通过 → 发 5 分钟有效的 HttpOnly 待验证 Cookie → `POST /api/session/totp`
   校验 6 位码（±1 窗口）→ 才发正式会话 Cookie；
 - 防重放：已用过的 30s 窗口不能再次使用；待验证会话最多 5 次尝试；
-- `rbackup-tui --web-gen-totp` 生成 secret 与 `otpauth://` URI；
+- `rbackup-ui --web-gen-totp` 生成 secret 与 `otpauth://` URI；
 - **token 登录跳过 TOTP**（token 本身就是强凭据，也作为丢失认证器时的恢复入口）。
 
 ### 15.5 新增接口与前端

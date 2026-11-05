@@ -262,9 +262,21 @@ func xdgStateDir() string {
 // appLogDir 返回应用日志目录，与 rbackup.sh 的 app_log_dir 保持一致，
 // 否则 TUI 找不到 rbackup.sh 写出的 .stats：
 //
-//	Windows: %LOCALAPPDATA%\rbackup-tui\Logs
-//	其他:    ${XDG_STATE_HOME:-~/.local/state}/rbackup-tui/log
+//	Windows: %LOCALAPPDATA%\rbackup-ui\Logs
+//	其他:    ${XDG_STATE_HOME:-~/.local/state}/rbackup-ui/log
 func appLogDir(goos string) string {
+	if goos == "windows" {
+		if d := os.Getenv("LOCALAPPDATA"); d != "" {
+			return filepath.Join(d, "rbackup-ui", "Logs")
+		}
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, "AppData", "Local", "rbackup-ui", "Logs")
+	}
+	return filepath.Join(xdgStateDir(), "rbackup-ui", "log")
+}
+
+// legacyAppLogDir 是改名前的日志目录（rbackup-tui），仅用于兼容旧配置/旧 .stats。
+func legacyAppLogDir(goos string) string {
 	if goos == "windows" {
 		if d := os.Getenv("LOCALAPPDATA"); d != "" {
 			return filepath.Join(d, "rbackup-tui", "Logs")
@@ -295,8 +307,9 @@ func findScriptPath() string {
 	}
 	home, _ := os.UserHomeDir()
 	candidates := []string{
-		filepath.Join(home, "rbackup-tui", "rbackup.sh"),
-		filepath.Join(home, "rbackup", "rbackup.sh"), // 旧布局，保持兼容
+		filepath.Join(home, "rbackup-ui", "rbackup.sh"),
+		filepath.Join(home, "rbackup-tui", "rbackup.sh"), // 改名前的目录，保持兼容
+		filepath.Join(home, "rbackup", "rbackup.sh"),     // 更旧布局，保持兼容
 		filepath.Join(home, ".local", "bin", "rbackup"),
 		filepath.Join(home, ".local", "bin", "rbackup.sh"),
 	}
@@ -316,24 +329,26 @@ func findScriptPath() string {
 
 // findConfigPath 按以下优先级解析配置文件：
 //
-//	-c/--config（在 NewApp 中覆盖）> RBACKUP_CONFIG > XDG 配置目录
-//	> ~/rbackup-tui/config.ini（过渡兼容）> ~/rbackup/config.ini（更旧布局）
+//	-c/--config（在 NewApp 中覆盖）> RBACKUP_CONFIG
+//	> $XDG_CONFIG_HOME/rbackup-ui/config.ini > $XDG_CONFIG_HOME/rbackup-tui/config.ini（改名兼容）
+//	> ~/rbackup-ui/config.ini > ~/rbackup-tui/config.ini（改名兼容）> ~/rbackup/config.ini（更旧布局）
 func findConfigPath() string {
 	if p := os.Getenv("RBACKUP_CONFIG"); p != "" {
 		return p
 	}
 	home, _ := os.UserHomeDir()
-	xdgPath := filepath.Join(xdgConfigDir(), "rbackup-tui", "config.ini")
-	legacyTui := filepath.Join(home, "rbackup-tui", "config.ini")
-	legacyOld := filepath.Join(home, "rbackup", "config.ini")
-	if _, err := os.Stat(xdgPath); err == nil {
-		return xdgPath
+	xdgPath := filepath.Join(xdgConfigDir(), "rbackup-ui", "config.ini")
+	candidates := []string{
+		xdgPath,
+		filepath.Join(xdgConfigDir(), "rbackup-tui", "config.ini"), // 改名兼容
+		filepath.Join(home, "rbackup-ui", "config.ini"),
+		filepath.Join(home, "rbackup-tui", "config.ini"), // 改名兼容
+		filepath.Join(home, "rbackup", "config.ini"),     // 更旧布局
 	}
-	if _, err := os.Stat(legacyTui); err == nil {
-		return legacyTui // 过渡兼容：安装器旧版本把配置放在这里
-	}
-	if _, err := os.Stat(legacyOld); err == nil {
-		return legacyOld // 更旧布局，保持兼容
+	for _, c := range candidates {
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
 	}
 	return xdgPath
 }
@@ -354,11 +369,11 @@ func argValue(args []string, i *int, flag string) (string, error) {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `rbackup-tui %s —— rbackup.sh 的终端界面（默认）/ Web 界面（--web）
+	fmt.Fprintf(os.Stderr, `rbackup-ui %s —— rbackup.sh 的终端界面（默认）/ Web 界面（--web）
 
 用法:
-  rbackup-tui [全局选项]              启动 TUI
-  rbackup-tui --web [Web 选项]        启动 Web 界面（不启动 TUI）
+  rbackup-ui [全局选项]              启动 TUI
+  rbackup-ui --web [Web 选项]        启动 Web 界面（不启动 TUI）
 
 说明:
   只要命令行里出现任一 --web-* 选项，就会自动启用 Web 模式（--web 可省略）。
@@ -583,8 +598,8 @@ func dirWritable(dir string) bool {
 
 // resolveLogDir 与 rbackup.sh 的 LOG_DIR 回退链保持一致，否则 TUI 会找不到 .stats：
 //
-//	配置里的 LOG_DIR → 平台默认目录（Windows %LOCALAPPDATA%\rbackup-tui\Logs，
-//	其他 $XDG_STATE_HOME/rbackup-tui/log）→ <脚本同目录>/log（旧行为，最后兜底）
+//	配置里的 LOG_DIR → 平台默认目录（Windows %LOCALAPPDATA%\rbackup-ui\Logs，
+//	其他 $XDG_STATE_HOME/rbackup-ui/log）→ <脚本同目录>/log（旧行为，最后兜底）
 func resolveLogDir(cfgLogDir, scriptPath string) string {
 	if dirWritable(cfgLogDir) {
 		return cfgLogDir
@@ -592,6 +607,10 @@ func resolveLogDir(cfgLogDir, scriptPath string) string {
 	stateFallback := appLogDir(runtime.GOOS)
 	if dirWritable(stateFallback) {
 		return stateFallback
+	}
+	// 改名兼容：旧版本 rbackup.sh 写的是 rbackup-tui/log，仍能读到旧 .stats
+	if legacy := legacyAppLogDir(runtime.GOOS); dirWritable(legacy) {
+		return legacy
 	}
 	if scriptPath != "" {
 		fallback := filepath.Join(filepath.Dir(scriptPath), "log")
@@ -2187,7 +2206,7 @@ func (a *App) helpContent() string {
 	var b strings.Builder
 
 	b.WriteString(fmt.Sprintf(
-		"[yellow::b]rbackup-tui[-:-:-]  [white]%s[-]  [gray](git: %s, 构建: %s)[-]\n",
+		"[yellow::b]rbackup-ui[-:-:-]  [white]%s[-]  [gray](git: %s, 构建: %s)[-]\n",
 		Version, GitCommit, BuildTime))
 	b.WriteString("\n")
 	b.WriteString("[yellow]作者:[-]  Jet Locke\n")
@@ -2251,11 +2270,11 @@ func (a *App) helpContent() string {
 	b.WriteString("\n")
 
 	b.WriteString("[yellow::b]─── 关于 ────────────────────────────────────────────[-:-:-]\n")
-	b.WriteString("  rbackup-tui 是 rbackup.sh 的 TUI 前端\n")
+	b.WriteString("  rbackup-ui 是 rbackup.sh 的 TUI 前端\n")
 	b.WriteString("  配置文件: 与 rbackup.sh 共用 config.ini\n")
 	b.WriteString("  日志目录: 由 config.ini 的 LOG_DIR 决定，默认跟随平台\n")
-	b.WriteString("            Linux: $XDG_STATE_HOME/rbackup-tui/log\n")
-	b.WriteString("            Windows: %LOCALAPPDATA%\\rbackup-tui\\Logs\n")
+	b.WriteString("            Linux: $XDG_STATE_HOME/rbackup-ui/log\n")
+	b.WriteString("            Windows: %LOCALAPPDATA%\\rbackup-ui\\Logs\n")
 	b.WriteString("\n")
 	b.WriteString("[gray]按 q 或 Esc 关闭本帮助[-]\n")
 
@@ -2351,12 +2370,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, "错误：找不到 rbackup.sh")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "请按以下方式之一指定：")
-		fmt.Fprintln(os.Stderr, "  1. 命令行: rbackup-tui -s /path/to/rbackup.sh")
+		fmt.Fprintln(os.Stderr, "  1. 命令行: rbackup-ui -s /path/to/rbackup.sh")
 		fmt.Fprintln(os.Stderr, "  2. 环境变量: export RBACKUP_SCRIPT=/path/to/rbackup.sh")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "查找过的位置：")
 		fmt.Fprintln(os.Stderr, "  <二进制同目录>/rbackup.sh")
-		fmt.Fprintln(os.Stderr, "  $HOME/rbackup-tui/rbackup.sh")
+		fmt.Fprintln(os.Stderr, "  $HOME/rbackup-ui/rbackup.sh")
 		fmt.Fprintln(os.Stderr, "  $HOME/rbackup/rbackup.sh")
 		fmt.Fprintln(os.Stderr, "  $HOME/.local/bin/rbackup")
 		fmt.Fprintln(os.Stderr, "  $HOME/.local/bin/rbackup.sh")

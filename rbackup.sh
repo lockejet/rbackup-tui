@@ -23,8 +23,8 @@ SEP80="-------------------------------------------------------------------------
 
 # ---------- 平台判定与应用日志目录 ----------
 # 与 main.go 的 appLogDir 保持一致，否则 TUI 找不到 .stats：
-#   Windows: %LOCALAPPDATA%\rbackup-tui\Logs
-#   其他:    ${XDG_STATE_HOME:-$HOME/.local/state}/rbackup-tui/log
+#   Windows: %LOCALAPPDATA%\rbackup-ui\Logs
+#   其他:    ${XDG_STATE_HOME:-$HOME/.local/state}/rbackup-ui/log
 is_windows() {
     case "$(uname -s 2>/dev/null)" in
         MINGW*|MSYS*|CYGWIN*) return 0 ;;
@@ -40,6 +40,26 @@ app_log_dir() {
         fi
         # MSYS/Cygwin 下 LOCALAPPDATA 可能是原生 Windows 路径（C:\Users\…），
         # 先转成 POSIX 路径再参与路径拼接。
+        if [ "${base#/}" = "$base" ]; then
+            if command -v cygpath >/dev/null 2>&1; then
+                base="$(cygpath -u "$base")"
+            else
+                base="${base//\\//}"
+            fi
+        fi
+        printf '%s/rbackup-ui/Logs' "${base%/}"
+    elif [ -n "${XDG_STATE_HOME:-}" ] && [ "${XDG_STATE_HOME#/}" != "$XDG_STATE_HOME" ]; then
+        printf '%s/rbackup-ui/log' "${XDG_STATE_HOME%/}"
+    else
+        printf '%s/.local/state/rbackup-ui/log' "${HOME:-/tmp}"
+    fi
+}
+
+# 改名前的目录（rbackup-tui）：仅用于兼容旧日志目录
+legacy_app_log_dir() {
+    if is_windows; then
+        local base="${LOCALAPPDATA:-}"
+        [ -z "$base" ] && base="${USERPROFILE:-$HOME}/AppData/Local"
         if [ "${base#/}" = "$base" ]; then
             if command -v cygpath >/dev/null 2>&1; then
                 base="$(cygpath -u "$base")"
@@ -314,8 +334,8 @@ while true; do
   SSH_PORT    SSH 端口（默认 22）
   SSH_USER    SSH 用户名（默认 admin）
   SSH_KEY     SSH 私钥路径（默认 ~/.ssh/id_ed25519）
-  LOG_DIR     日志目录（默认跟随平台：\$XDG_STATE_HOME/rbackup-tui/log，
-              Windows 为 %LOCALAPPDATA%\rbackup-tui\Logs）
+  LOG_DIR     日志目录（默认跟随平台：\$XDG_STATE_HOME/rbackup-ui/log，
+              Windows 为 %LOCALAPPDATA%\rbackup-ui\Logs）
   GLOBAL_OPTS rsync 全局选项
   RSYNC_PATH  提权命令
   MOUNT_POLICY 挂载门禁策略
@@ -529,6 +549,7 @@ log_dir_writable() {
 
 # 应用日志目录（与 app_log_dir 一致，供回退链使用）
 APP_LOG_DIR="$(app_log_dir)"
+LEGACY_LOG_DIR="$(legacy_app_log_dir)"
 
 LOG_DIR_RESOLVED=""
 if log_dir_writable "$LOG_DIR"; then
@@ -538,6 +559,9 @@ elif log_dir_writable "$APP_LOG_DIR"; then
     if [ "$LOG_DIR" != "$APP_LOG_DIR" ]; then
         echo "警告：无法写入 $LOG_DIR，日志回退到 $APP_LOG_DIR/" >&2
     fi
+elif log_dir_writable "$LEGACY_LOG_DIR"; then
+    LOG_DIR_RESOLVED="$LEGACY_LOG_DIR"
+    echo "警告：无法写入 $LOG_DIR，日志回退到改名前的目录 $LEGACY_LOG_DIR/" >&2
 elif log_dir_writable "${SCRIPT_DIR}/log"; then
     LOG_DIR_RESOLVED="${SCRIPT_DIR}/log"
     echo "警告：无法写入 $LOG_DIR，日志回退到 ${SCRIPT_DIR}/log/" >&2

@@ -6,8 +6,8 @@ SSH_PORT=22
 SSH_USER=admin
 SSH_KEY=~/.ssh/id_ed25519
 # 日志目录（可选；不写则跟随平台：
-#   Linux   $XDG_STATE_HOME/rbackup-tui/log（默认 ~/.local/state/…）
-#   Windows %LOCALAPPDATA%\rbackup-tui\Logs）
+#   Linux   $XDG_STATE_HOME/rbackup-ui/log（默认 ~/.local/state/…）
+#   Windows %LOCALAPPDATA%\rbackup-ui\Logs）
 #LOG_DIR=/var/log/rbackup
 #GLOBAL_OPTS=-avzhu --progress
 GLOBAL_OPTS=-avzhu --progress --no-perms --no-times --omit-dir-times --update --delete-after --8-bit-output
