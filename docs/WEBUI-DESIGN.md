@@ -96,10 +96,10 @@
 ```bash
 # 本机临时用（默认）
 rbackup-ui --web
-# → http://127.0.0.1:8080
+# → http://127.0.0.1:30031
 
 # 常驻服务（推荐：绑 loopback，由 Tailscale/WireGuard 或反代对外）
-rbackup-ui --web --web-addr 127.0.0.1:8080 --web-token-file /etc/rbackup-ui/web.token
+rbackup-ui --web --web-token-file /etc/rbackup-ui/web.token   # 默认 127.0.0.1:30031
 
 # 内网直连（必须 token + TLS）
 rbackup-ui --web --web-addr 0.0.0.0:8443 \
@@ -115,7 +115,7 @@ rbackup-ui --web -c ~/.config/rbackup-ui/config.ini -s ~/.local/bin/rbackup.sh
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `--web` | 关 | 启用 Web 模式（与 TUI 互斥） |
-| `--web-addr` | `127.0.0.1:8080` | 监听地址；`http://` 前缀可选 |
+| `--web-addr` | `127.0.0.1:30031` | 监听地址；`http://` 前缀可选 |
 | `--web-token-file` | 无 | token 文件（**推荐**，避免出现在 `ps` / shell history） |
 | `--web-token` | 无 | 直接指定 token（不推荐，会进 `ps`） |
 | `--web-tls-cert` / `--web-tls-key` | 无 | 直接 TLS；两者必须同时给 |
@@ -155,7 +155,7 @@ rbackup-ui --web -c ~/.config/rbackup-ui/config.ini -s ~/.local/bin/rbackup.sh
 | 威胁 | 防护 |
 |---|---|
 | 局域网/公网扫描到端口 | 默认 loopback；非 loopback 必须 token+TLS |
-| 浏览器恶意页面 CSRF（`fetch('http://127.0.0.1:8080/api/jobs')`） | 会话 Cookie `SameSite=Strict` + `Origin`/`Sec-Fetch-Site` 校验 + 写操作要求 `X-RB-CSRF` 头（跨站预检带不上） |
+| 浏览器恶意页面 CSRF（`fetch('http://127.0.0.1:30031/api/jobs')`） | 会话 Cookie `SameSite=Strict` + `Origin`/`Sec-Fetch-Site` 校验 + 写操作要求 `X-RB-CSRF` 头（跨站预检带不上） |
 | token 被日志/代理记录 | token 只用 header/表单提交，**禁止**放 URL query；SSE 用会话 Cookie（EventSource 不能带自定义头） |
 | token 被暴力破解 | 单 IP 认证失败限速（10 次/分钟）+ 失败审计 + 常数时间比较 |
 | 误操作危险任务 | 危险任务需 `confirm:true`；UI 强制"先 dry-run 预览再执行" |
@@ -387,7 +387,7 @@ Group=users
 # token 放 0600 文件，避免出现在 ps / unit 文件里
 EnvironmentFile=-/etc/rbackup-ui/web.env        # 可选：RBACKUP_WEB_TOKEN_FILE=...
 ExecStart=%h/.local/bin/rbackup-ui --web \
-  --web-addr 127.0.0.1:8080 \
+  --web-addr 127.0.0.1:30031 \
   --web-token-file /etc/rbackup-ui/web.token \
   --web-audit-log %h/.local/state/rbackup-ui/log/web-audit.log
 Restart=on-failure
@@ -409,15 +409,15 @@ WantedBy=multi-user.target
 
 | 形态 | 配置 | 安全性 | 适用 |
 |---|---|---|---|
-| **A. 隧道/组网 + loopback（推荐）** | `--web-addr 127.0.0.1:8080`，用 Tailscale / WireGuard 从手机接入 | 最高（端口不暴露公网） | 个人远程 |
-| B. 反代 + TLS | Caddy/Nginx 反代 `127.0.0.1:8080`，加 HSTS | 高（需要域名/证书） | 局域网或公网域名 |
+| **A. 隧道/组网 + loopback（推荐）** | `--web-addr 127.0.0.1:30031`，用 Tailscale / WireGuard 从手机接入 | 最高（端口不暴露公网） | 个人远程 |
+| B. 反代 + TLS | Caddy/Nginx 反代 `127.0.0.1:30031`，加 HSTS | 高（需要域名/证书） | 局域网或公网域名 |
 | C. 内网直连 TLS | `--web-addr 0.0.0.0:8443 --web-tls-cert/key` + token | 中（内网信任模型） | 隔离内网 |
 
 Caddy 片段：
 
 ```
 rbackup.example.com {
-    reverse_proxy 127.0.0.1:8080 {
+    reverse_proxy 127.0.0.1:30031 {
         flush_interval -1        # SSE 必须关闭缓冲
     }
 }

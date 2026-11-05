@@ -610,9 +610,13 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 同一个二进制可以用 `--web` 启动内嵌 Web 界面，浏览器/手机访问；TUI 与 Web 互斥启动。
 完整设计见 [docs/WEBUI-DESIGN.md](docs/WEBUI-DESIGN.md)。
 
+> **本机端口规划**：`rbackup-ui` 默认监听 `127.0.0.1:30031`；
+> 配套的 `gocryptfs-ui` 使用 `127.0.0.1:30032`。两者都只绑 loopback，
+> 由本机反代/端口映射对外（如 8031 / 44331 → 30031）。
+
 ### 启动
 
-    # 本机使用（默认只监听 127.0.0.1:8080）
+    # 本机使用（默认只监听 127.0.0.1:30031）
     rbackup-ui --web
 
     # 只要出现任一 --web-* 选项就会自动启用 Web 模式（--web 可省略）
@@ -620,14 +624,14 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 
     # 常驻服务（推荐：绑 loopback，由 Tailscale/WireGuard 或反代对外）
     openssl rand -base64 32 > /etc/rbackup-ui/web.token && chmod 600 /etc/rbackup-ui/web.token
-    rbackup-ui --web --web-addr 127.0.0.1:8080 --web-token-file /etc/rbackup-ui/web.token
+    rbackup-ui --web --web-token-file /etc/rbackup-ui/web.token
 
 ### 参数
 
 | 参数 | 说明 |
 |---|---|
 | `--web` | 启用 Web 模式（与 TUI 互斥） |
-| `--web-addr` | 监听地址，默认 `127.0.0.1:8080` |
+| `--web-addr` | 监听地址，默认 `127.0.0.1:30031` |
 | `--web-token-file` | token 文件（推荐，避免出现在 `ps`） |
 | `--web-token` | 直接指定 token（不推荐） |
 | `--web-tls-cert` / `--web-tls-key` | 直接启用 TLS（两者必须同时给） |
@@ -658,8 +662,8 @@ cat /tmp/totp.txt                       # 记录 secret 和 otpauth URI
 sed -n '2p' /tmp/totp.txt > ~/.config/rbackup-ui/web.totp
 chmod 600 ~/.config/rbackup-ui/web.totp && rm -f /tmp/totp.txt
 
-# ③ 启动：密码 + TOTP，token 作为恢复方式
-rbackup-ui --web-addr 127.0.0.1:8080 \
+# ③ 启动：默认监听 127.0.0.1:30031，密码 + TOTP，token 作为恢复方式
+rbackup-ui \
   --web-password-hash-file ~/.config/rbackup-ui/web.passwd \
   --web-2fa totp --web-totp-secret-file ~/.config/rbackup-ui/web.totp \
   --web-token-file ~/.config/rbackup-ui/web.token
@@ -688,11 +692,11 @@ rbackup-ui --web-addr 127.0.0.1:8080 \
 
 **方式一：SSH 隧道（最简单，零暴露）**
 
-本机保持默认监听 `127.0.0.1:8080`，在你的电脑上建隧道，然后把浏览器指向本机：
+本机保持默认监听 `127.0.0.1:30031`，在你的电脑上建隧道，然后把浏览器指向本机：
 
     # Windows / macOS / Linux 终端
-    ssh -L 8080:127.0.0.1:8080 <user>@<服务器地址>
-    # 然后打开 http://127.0.0.1:8080
+    ssh -L 30031:127.0.0.1:30031 <user>@<服务器地址>
+    # 然后打开 http://127.0.0.1:30031
 
 手机可以用 Termius/JuiceSSH 之类的 App 做同样的端口转发。
 
@@ -705,19 +709,21 @@ VPN 已把流量加密，可直接绑 VPN 地址 + token（不需要额外 TLS�
     openssl rand -base64 32 > ~/.config/rbackup-ui/web.token
     chmod 600 ~/.config/rbackup-ui/web.token
 
-    # 绑到 VPN 网卡地址（示例 10.14.10.5，换成你自己的）
-    rbackup-ui --web-addr 10.14.10.5:8080       --web-token-file ~/.config/rbackup-ui/web.token       --web-insecure-http
+    # 想直连 VPN 地址时，显式指定 --web-addr（默认只绑 loopback）
+    rbackup-ui --web-addr 10.14.10.5:30031 \
+      --web-token-file ~/.config/rbackup-ui/web.token \
+      --web-insecure-http
 
-手机连上 VPN 后访问 `http://10.14.10.5:8080`，输入 token 即可。
+手机连上 VPN 后访问 `http://10.14.10.5:30031`，输入 token 即可。
 （`--web-insecure-http` 只在这类已加密的私有网络里使用。）
 
 **方式三：反代 + TLS（有域名/证书时）**
 
-Nginx/Caddy 反代到 `127.0.0.1:8080`，SSE 需关闭缓冲：
+Nginx/Caddy 反代到 `127.0.0.1:30031`，SSE 需关闭缓冲：
 
     # Caddy
     rbackup.example.com {
-        reverse_proxy 127.0.0.1:8080 {
+        reverse_proxy 127.0.0.1:30031 {
             flush_interval -1
         }
     }

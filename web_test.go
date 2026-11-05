@@ -178,13 +178,13 @@ func (e *testEnv) waitLastJob(t *testing.T, states ...string) map[string]any {
 
 func TestWebOptionsValidate(t *testing.T) {
 	base := defaultWebOptions()
-	base.Addr = "127.0.0.1:8080"
+	base.Addr = "127.0.0.1:30031"
 	if err := base.validate(); err != nil {
 		t.Fatalf("loopback 默认应通过: %v", err)
 	}
 
 	o := defaultWebOptions()
-	o.Addr = "0.0.0.0:8080"
+	o.Addr = "0.0.0.0:30031"
 	if err := o.validate(); err == nil {
 		t.Fatal("非 loopback 无 token 应拒绝")
 	}
@@ -205,7 +205,7 @@ func TestWebOptionsValidate(t *testing.T) {
 	}
 
 	o3 := defaultWebOptions()
-	o3.Addr = "127.0.0.1:8080"
+	o3.Addr = "127.0.0.1:30031"
 	o3.Token = "short"
 	if err := o3.validate(); err == nil {
 		t.Fatal("过短 token 应拒绝")

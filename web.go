@@ -5,6 +5,7 @@ package main
 // 设计见 docs/WEBUI-DESIGN.md。原则：
 //   - 只观察 + 受控触发，不提供任意命令执行
 //   - 单 job 互斥；任务串行；取消按进程组终止
+//   - 默认仅监听 127.0.0.1:30031（本机端口规划：rbackup-ui=30031，gocryptfs-ui=30032）
 //   - 非 loopback 监听必须 token + TLS（fail-closed）
 //   - 危险任务（--delete / --remove-source-files）必须先成功 dry-run 预览
 
@@ -69,13 +70,13 @@ type webOptions struct {
 }
 
 func defaultWebOptions() webOptions {
-	return webOptions{Addr: "127.0.0.1:8080", MaxClients: 8, SessionTTL: 8 * time.Hour,
+	return webOptions{Addr: "127.0.0.1:30031", MaxClients: 8, SessionTTL: 8 * time.Hour,
 		User: "admin", TwoFA: "off"}
 }
 
 func isLoopbackHost(host string) bool {
 	if host == "" {
-		return false // ":8080" = 监听全部网卡
+		return false // ":30031" = 监听全部网卡
 	}
 	if strings.EqualFold(host, "localhost") {
 		return true
@@ -133,7 +134,7 @@ func (o *webOptions) validate() error {
 	}
 	host, _, err := net.SplitHostPort(o.Addr)
 	if err != nil {
-		return fmt.Errorf("--web-addr 格式错误（应形如 127.0.0.1:8080）: %v", err)
+		return fmt.Errorf("--web-addr 格式错误（应形如 127.0.0.1:30031）: %v", err)
 	}
 	loop := isLoopbackHost(host)
 	if o.Token != "" && len(o.Token) < 32 {

@@ -385,7 +385,7 @@ func usage() {
 
 Web 选项:
   --web                         启用 Web 模式（可省略）
-  --web-addr <地址>             监听地址（默认 127.0.0.1:8080）
+  --web-addr <地址>             监听地址（默认 127.0.0.1:30031）
   --web-token-file <文件>       token 文件（推荐，避免出现在 ps 中）
   --web-token <值>              直接指定 token（不推荐）
   --web-tls-cert <文件>         TLS 证书（非 loopback 监听时必需）
