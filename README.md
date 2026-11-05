@@ -613,6 +613,9 @@ rsync 只允许 `--chown` 出现一次。可以放在：
     # 本机使用（默认只监听 127.0.0.1:8080）
     rbackup-tui --web
 
+    # 只要出现任一 --web-* 选项就会自动启用 Web 模式（--web 可省略）
+    rbackup-tui --web-token-file /etc/rbackup-tui/web.token
+
     # 常驻服务（推荐：绑 loopback，由 Tailscale/WireGuard 或反代对外）
     openssl rand -base64 32 > /etc/rbackup-tui/web.token && chmod 600 /etc/rbackup-tui/web.token
     rbackup-tui --web --web-addr 127.0.0.1:8080 --web-token-file /etc/rbackup-tui/web.token
@@ -644,11 +647,54 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 
 ### 远程/手机访问
 
-| 形态 | 做法 |
-|---|---|
-| 隧道/组网（推荐） | 绑 `127.0.0.1`，用 Tailscale / WireGuard 从手机接入 |
-| 反代 + TLS | Caddy/Nginx 反代到 `127.0.0.1:8080`；SSE 需关闭缓冲（Caddy `flush_interval -1`） |
-| 内网直连 TLS | `--web-addr 0.0.0.0:8443 --web-tls-cert/-key --web-token-file` |
+**方式一：SSH 隧道（最简单，零暴露）**
+
+本机保持默认监听 `127.0.0.1:8080`，在你的电脑上建隧道，然后把浏览器指向本机：
+
+    # Windows / macOS / Linux 终端
+    ssh -L 8080:127.0.0.1:8080 <user>@<服务器地址>
+    # 然后打开 http://127.0.0.1:8080
+
+手机可以用 Termius/JuiceSSH 之类的 App 做同样的端口转发。
+
+**方式二：VPN 内网访问（WireGuard / Tailscale）**
+
+VPN 已把流量加密，可直接绑 VPN 地址 + token（不需要额外 TLS，但要显式允许明文）：
+
+    # 生成并保存 token
+    mkdir -p ~/.config/rbackup-tui
+    openssl rand -base64 32 > ~/.config/rbackup-tui/web.token
+    chmod 600 ~/.config/rbackup-tui/web.token
+
+    # 绑到 VPN 网卡地址（示例 10.14.10.5，换成你自己的）
+    rbackup-tui --web-addr 10.14.10.5:8080       --web-token-file ~/.config/rbackup-tui/web.token       --web-insecure-http
+
+手机连上 VPN 后访问 `http://10.14.10.5:8080`，输入 token 即可。
+（`--web-insecure-http` 只在这类已加密的私有网络里使用。）
+
+**方式三：反代 + TLS（有域名/证书时）**
+
+Nginx/Caddy 反代到 `127.0.0.1:8080`，SSE 需关闭缓冲：
+
+    # Caddy
+    rbackup.example.com {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+**方式四：内网直连自签 TLS**
+
+    openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+      -keyout web.key -out web.crt -subj "/CN=10.14.10.5"
+    rbackup-tui --web-addr 10.14.10.5:8443 \
+      --web-tls-cert web.crt --web-tls-key web.key \
+      --web-token-file ~/.config/rbackup-tui/web.token
+
+手机首次访问需要信任自签证书（或用方式一/二规避证书问题）。
+
+> 监听 `0.0.0.0` 等于对所有网卡开放；没有 TLS 时程序会拒绝启动，
+> 除非显式加 `--web-insecure-http`。公网暴露请务必走 TLS + token。
 
 systemd 常驻单元示例见 [docs/WEBUI-DESIGN.md](docs/WEBUI-DESIGN.md) 第 8 节。
 

@@ -465,3 +465,50 @@ func TestWebDecodeStrict(t *testing.T) {
 		t.Fatalf("非法请求不应启动 job: %v", cur)
 	}
 }
+
+func TestParseCLIWebFlags(t *testing.T) {
+	oldMode, oldOpts := webMode, webOpts
+	defer func() { webMode, webOpts = oldMode, oldOpts }()
+
+	reset := func() { webMode = false; webOpts = defaultWebOptions() }
+
+	// 只给 --web-token-file（没有 --web）也应自动进入 Web 模式
+	reset()
+	if _, _, err := parseCLI([]string{"rbackup-tui", "--web-token-file", "/tmp/web.token", "--web-addr", "127.0.0.1:9999"}); err != nil {
+		t.Fatalf("parseCLI: %v", err)
+	}
+	if !webMode {
+		t.Fatal("出现 --web-* 选项时应自动启用 Web 模式")
+	}
+	if webOpts.TokenFile != "/tmp/web.token" || webOpts.Addr != "127.0.0.1:9999" {
+		t.Fatalf("web 选项解析错误: %+v", webOpts)
+	}
+
+	// 缺值必须报错（而不是静默忽略）
+	reset()
+	if _, _, err := parseCLI([]string{"rbackup-tui", "--web-token-file"}); err == nil {
+		t.Fatal("--web-token-file 缺值应报错")
+	}
+	reset()
+	if _, _, err := parseCLI([]string{"rbackup-tui", "--web-addr"}); err == nil {
+		t.Fatal("--web-addr 缺值应报错")
+	}
+
+	// -c/-s 缺值同样报错
+	reset()
+	if _, _, err := parseCLI([]string{"rbackup-tui", "-c"}); err == nil {
+		t.Fatal("-c 缺值应报错")
+	}
+
+	// 仅 --web 仍可用
+	reset()
+	if _, _, err := parseCLI([]string{"rbackup-tui", "--web"}); err != nil || !webMode {
+		t.Fatalf("--web 解析失败: err=%v mode=%v", err, webMode)
+	}
+
+	// 非 web 参数不应误启用
+	reset()
+	if _, _, err := parseCLI([]string{"rbackup-tui", "-c", "/tmp/x.ini"}); err != nil || webMode {
+		t.Fatalf("普通参数不应启用 web: err=%v mode=%v", err, webMode)
+	}
+}

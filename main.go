@@ -344,13 +344,13 @@ var (
 	webOpts = defaultWebOptions()
 )
 
-// argString 读取形如 `--flag value` 的下一个参数。
-func argString(args []string, i *int) string {
-	if *i+1 < len(args) {
-		*i++
-		return args[*i]
+// argValue 取形如 `--flag value` 的值；缺失或下一个参数是另一个选项时报错。
+func argValue(args []string, i *int, flag string) (string, error) {
+	if *i+1 >= len(args) || strings.HasPrefix(args[*i+1], "-") {
+		return "", fmt.Errorf("%s 缺少参数值", flag)
 	}
-	return ""
+	*i++
+	return args[*i], nil
 }
 
 func usage() {
@@ -360,31 +360,36 @@ func usage() {
   rbackup-tui [全局选项]              启动 TUI
   rbackup-tui --web [Web 选项]        启动 Web 界面（不启动 TUI）
 
+说明:
+  只要命令行里出现任一 --web-* 选项，就会自动启用 Web 模式（--web 可省略）。
+
 全局选项:
   -c, --config <文件>     配置文件路径
   -s, --script <文件>     rbackup.sh 路径
   -h, --help              显示本帮助
 
 Web 选项:
-  --web                         启用 Web 模式
+  --web                         启用 Web 模式（可省略）
   --web-addr <地址>             监听地址（默认 127.0.0.1:8080）
   --web-token-file <文件>       token 文件（推荐，避免出现在 ps 中）
   --web-token <值>              直接指定 token（不推荐）
   --web-tls-cert <文件>         TLS 证书（非 loopback 监听时必需）
   --web-tls-key <文件>          TLS 私钥
-  --web-insecure-http           允许"非 loopback + 明文 HTTP"（仅限隔离内网）
+  --web-insecure-http           允许"非 loopback + 明文 HTTP"（仅限隔离内网/VPN）
   --web-audit-log <文件>        审计日志（默认 <日志目录>/web-audit.log，"-" 只写 stderr）
   --web-max-clients <n>         SSE 客户端上限（默认 8）
   --web-read-only               只读模式：禁止触发任务，只观察
 
 环境变量: RBACKUP_WEB_TOKEN / RBACKUP_WEB_TOKEN_FILE / RBACKUP_WEB_ADDR
-安全默认: 监听非 loopback 地址必须 token + TLS，否则拒绝启动。
+安全默认: 监听非 loopback 地址必须 token + TLS，否则拒绝启动；
+          仅当显式 --web-insecure-http 时才允许明文（内网/VPN 场景）。
 `, Version)
 }
 
-func NewApp() *App {
-	configPath := findConfigPath()
-	scriptPath := findScriptPath()
+// parseCLI 解析命令行与环境变量，返回配置/脚本路径；web 模式相关状态写入包级变量。
+func parseCLI(args []string) (configPath, scriptPath string, err error) {
+	configPath = findConfigPath()
+	scriptPath = findScriptPath()
 
 	// 环境变量先于命令行参数（命令行可覆盖）
 	if v := os.Getenv("RBACKUP_WEB_TOKEN"); v != "" {
@@ -397,55 +402,98 @@ func NewApp() *App {
 		webOpts.Addr = v
 	}
 
-	for i := 1; i < len(os.Args); i++ {
-		switch os.Args[i] {
+	for i := 1; i < len(args); i++ {
+		var v string
+		switch args[i] {
 		case "-c", "--config":
-			if v := argString(os.Args, &i); v != "" {
-				configPath = expandTilde(v)
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
 			}
+			configPath = expandTilde(v)
 		case "-s", "--script":
-			if v := argString(os.Args, &i); v != "" {
-				scriptPath = expandTilde(v)
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
 			}
+			scriptPath = expandTilde(v)
 		case "-h", "--help":
 			usage()
 			os.Exit(0)
 		case "--web":
 			webMode = true
 		case "--web-addr":
-			webOpts.Addr = argString(os.Args, &i)
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
+			}
+			webMode = true
+			webOpts.Addr = v
 		case "--web-token":
-			webOpts.Token = argString(os.Args, &i)
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
+			}
+			webMode = true
+			webOpts.Token = v
 		case "--web-token-file":
-			webOpts.TokenFile = argString(os.Args, &i)
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
+			}
+			webMode = true
+			webOpts.TokenFile = v
 		case "--web-tls-cert":
-			webOpts.TLSCert = argString(os.Args, &i)
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
+			}
+			webMode = true
+			webOpts.TLSCert = v
 		case "--web-tls-key":
-			webOpts.TLSKey = argString(os.Args, &i)
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
+			}
+			webMode = true
+			webOpts.TLSKey = v
 		case "--web-audit-log":
-			webOpts.AuditLog = argString(os.Args, &i)
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
+			}
+			webMode = true
+			webOpts.AuditLog = v
 		case "--web-insecure-http":
+			webMode = true
 			webOpts.InsecureHTTP = true
 		case "--web-read-only":
+			webMode = true
 			webOpts.ReadOnly = true
 		case "--web-max-clients":
-			if v := argString(os.Args, &i); v != "" {
-				if n, err := strconv.Atoi(v); err == nil && n > 0 {
-					webOpts.MaxClients = n
-				}
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
+			}
+			webMode = true
+			if n, e := strconv.Atoi(v); e == nil && n > 0 {
+				webOpts.MaxClients = n
+			} else {
+				return "", "", fmt.Errorf("--web-max-clients 需要正整数，得到 %q", v)
 			}
 		}
 	}
 
 	if configPath != "" {
-		if abs, err := filepath.Abs(configPath); err == nil {
+		if abs, e := filepath.Abs(configPath); e == nil {
 			configPath = abs
 		}
 	}
 	if scriptPath != "" {
-		if abs, err := filepath.Abs(scriptPath); err == nil {
+		if abs, e := filepath.Abs(scriptPath); e == nil {
 			scriptPath = abs
 		}
+	}
+	return configPath, scriptPath, nil
+}
+
+func NewApp() *App {
+	configPath, scriptPath, err := parseCLI(os.Args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "参数错误: %v\n\n", err)
+		usage()
+		os.Exit(2)
 	}
 
 	return &App{
