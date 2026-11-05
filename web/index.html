@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rbackup-tui</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- 登录 -->
+<div id="loginView" class="login-view">
+  <form id="loginForm" class="login-card" autocomplete="off">
+    <h1>rbackup-tui <span id="loginVersion" class="ver"></span></h1>
+    <p class="hint" id="loginHint">请输入访问 token</p>
+    <input id="tokenInput" type="password" autocomplete="current-password" placeholder="token">
+    <button type="submit" class="primary">登录</button>
+    <p id="loginError" class="error hidden"></p>
+    <p class="hint small">token 由服务端启动参数提供；本机无 token 模式直接点登录即可。</p>
+  </form>
+</div>
+
+<!-- 主界面 -->
+<div id="appView" class="hidden">
+  <header class="topbar">
+    <div class="brand">rbackup-tui <span id="version" class="ver"></span></div>
+    <div class="meta" id="meta"></div>
+    <div class="actions">
+      <button id="reloadBtn" class="ghost" title="重新读取配置">重载</button>
+      <button id="logoutBtn" class="ghost">退出</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner hidden"></div>
+
+  <section class="info" id="info"></section>
+
+  <main class="layout">
+    <section class="tasks card">
+      <div class="card-head">
+        <h2>任务列表</h2>
+        <div class="toolbar">
+          <label class="chk"><input type="checkbox" id="selectAll"> 全选</label>
+          <button id="runBtn" class="primary">运行选中</button>
+          <button id="dryBtn">Dry-run 预览</button>
+          <button id="mountBtn">挂载检查</button>
+          <button id="cancelBtn" class="danger hidden">取消运行</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="taskTable">
+          <thead><tr>
+            <th class="c-chk"></th><th>任务名</th><th class="c-src">源</th>
+            <th class="c-dst">目标</th><th class="c-gate">门禁</th><th class="c-danger">危险</th>
+          </tr></thead>
+          <tbody id="taskBody"></tbody>
+        </table>
+        <p id="emptyHint" class="hint hidden">配置中没有任务，或配置加载失败。</p>
+      </div>
+    </section>
+
+    <section class="log card">
+      <div class="card-head">
+        <h2>运行日志</h2>
+        <div class="toolbar">
+          <span id="jobState" class="badge idle">空闲</span>
+          <button id="pauseBtn" class="ghost">暂停滚动</button>
+          <button id="clearBtn" class="ghost">清屏</button>
+        </div>
+      </div>
+      <pre id="log" class="log-body"></pre>
+    </section>
+  </main>
+
+  <footer id="stats" class="stats"></footer>
+</div>
+
+<!-- 确认弹窗 -->
+<div id="modal" class="modal hidden">
+  <div class="modal-card">
+    <h3 id="modalTitle">确认执行</h3>
+    <div id="modalBody"></div>
+    <div class="modal-actions">
+      <button id="modalCancel" class="ghost">取消</button>
+      <button id="modalOk" class="danger">确认执行</button>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

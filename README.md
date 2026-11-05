@@ -37,6 +37,13 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
   - [命令行参数](#命令行参数)
   - [脚本路径查找顺序](#脚本路径查找顺序)
   - [典型流程](#典型流程)
+- [Web UI（可选）](#web-ui可选)
+  - [启动](#启动-1)
+  - [参数](#参数)
+  - [安全默认（fail-closed）](#安全默认fail-closed)
+  - [远程/手机访问](#远程手机访问)
+  - [页面功能](#页面功能)
+  - [限制](#限制)
 - [快捷键](#快捷键)
   - [全局](#全局)
   - [焦点 1：信息区（header）](#焦点-1信息区header)
@@ -75,7 +82,7 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
   - [发布到 GitHub Release](#发布到-github-release)
   - [本地打包（不上传）](#本地打包不上传)
   - [其他发布命令](#其他发布命令)
-  - [参数](#参数)
+  - [参数](#参数-1)
 - [环境变量](#环境变量)
 - [常见问题](#常见问题)
   - [F1 无反应？](#f1-无反应)
@@ -565,6 +572,8 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 |---|---|
 | -c, --config | 配置文件路径 |
 | -s, --script | rbackup.sh 路径 |
+| -h, --help | 显示帮助（含 Web 模式参数） |
+| --web | 启动 Web 界面而非 TUI，见 [Web UI](#web-ui可选) |
 
 ### 脚本路径查找顺序
 
@@ -593,6 +602,68 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 6. 完成后按 Tab 切换焦点查看各区
 
 ---
+
+## Web UI（可选）
+
+同一个二进制可以用 `--web` 启动内嵌 Web 界面，浏览器/手机访问；TUI 与 Web 互斥启动。
+完整设计见 [docs/WEBUI-DESIGN.md](docs/WEBUI-DESIGN.md)。
+
+### 启动
+
+    # 本机使用（默认只监听 127.0.0.1:8080）
+    rbackup-tui --web
+
+    # 常驻服务（推荐：绑 loopback，由 Tailscale/WireGuard 或反代对外）
+    openssl rand -base64 32 > /etc/rbackup-tui/web.token && chmod 600 /etc/rbackup-tui/web.token
+    rbackup-tui --web --web-addr 127.0.0.1:8080 --web-token-file /etc/rbackup-tui/web.token
+
+### 参数
+
+| 参数 | 说明 |
+|---|---|
+| `--web` | 启用 Web 模式（与 TUI 互斥） |
+| `--web-addr` | 监听地址，默认 `127.0.0.1:8080` |
+| `--web-token-file` | token 文件（推荐，避免出现在 `ps`） |
+| `--web-token` | 直接指定 token（不推荐） |
+| `--web-tls-cert` / `--web-tls-key` | 直接启用 TLS（两者必须同时给） |
+| `--web-insecure-http` | 允许"非 loopback + 明文 HTTP"（仅限隔离内网） |
+| `--web-audit-log` | 审计日志文件，默认 `<日志目录>/web-audit.log`；`-` 只写 stderr |
+| `--web-max-clients` | SSE 客户端上限，默认 8 |
+| `--web-read-only` | 只读模式：只观察，禁止触发任务 |
+
+环境变量：`RBACKUP_WEB_TOKEN` / `RBACKUP_WEB_TOKEN_FILE` / `RBACKUP_WEB_ADDR`
+（命令行优先）。
+
+### 安全默认（fail-closed）
+
+- 默认只监听 `127.0.0.1`；
+- 监听非 loopback 地址时**必须** token + TLS，否则**拒绝启动**；
+- 会话用 HttpOnly + `SameSite=Strict` Cookie，写操作要求 CSRF 头；token 不进 URL；
+- 危险任务（`delete=yes` / `remove_source=yes`）必须**先成功 Dry-run 预览**，再二次确认；
+- 触发/取消/登录都写审计日志（`web-audit.log`）。
+
+### 远程/手机访问
+
+| 形态 | 做法 |
+|---|---|
+| 隧道/组网（推荐） | 绑 `127.0.0.1`，用 Tailscale / WireGuard 从手机接入 |
+| 反代 + TLS | Caddy/Nginx 反代到 `127.0.0.1:8080`；SSE 需关闭缓冲（Caddy `flush_interval -1`） |
+| 内网直连 TLS | `--web-addr 0.0.0.0:8443 --web-tls-cert/-key --web-token-file` |
+
+systemd 常驻单元示例见 [docs/WEBUI-DESIGN.md](docs/WEBUI-DESIGN.md) 第 8 节。
+
+### 页面功能
+
+- 任务列表（配置只读）、门禁模式、危险操作标记；
+- 运行选中 / Dry-run 预览 / 挂载检查（手动按钮）/ 取消运行；
+- SSE 实时日志与每任务统计（文件数、大小、数据量、速率）；
+- 只读模式（`--web-read-only`）适合当监控页。
+
+### 限制
+
+- 不支持在 Web 上编辑配置：改 `config.ini` 后点「重载」；
+- 历史日志/统计浏览不在本版本（v1.2 计划）；
+- 一次只跑一个 job、任务串行，与 TUI 语义一致。
 
 ## 快捷键
 

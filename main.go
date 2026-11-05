@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -337,21 +338,101 @@ func findConfigPath() string {
 	return xdgPath
 }
 
+// Web 模式开关与选项（--web 相关参数；默认值见 web.go）。
+var (
+	webMode bool
+	webOpts = defaultWebOptions()
+)
+
+// argString 读取形如 `--flag value` 的下一个参数。
+func argString(args []string, i *int) string {
+	if *i+1 < len(args) {
+		*i++
+		return args[*i]
+	}
+	return ""
+}
+
+func usage() {
+	fmt.Fprintf(os.Stderr, `rbackup-tui %s —— rbackup.sh 的终端界面（默认）/ Web 界面（--web）
+
+用法:
+  rbackup-tui [全局选项]              启动 TUI
+  rbackup-tui --web [Web 选项]        启动 Web 界面（不启动 TUI）
+
+全局选项:
+  -c, --config <文件>     配置文件路径
+  -s, --script <文件>     rbackup.sh 路径
+  -h, --help              显示本帮助
+
+Web 选项:
+  --web                         启用 Web 模式
+  --web-addr <地址>             监听地址（默认 127.0.0.1:8080）
+  --web-token-file <文件>       token 文件（推荐，避免出现在 ps 中）
+  --web-token <值>              直接指定 token（不推荐）
+  --web-tls-cert <文件>         TLS 证书（非 loopback 监听时必需）
+  --web-tls-key <文件>          TLS 私钥
+  --web-insecure-http           允许"非 loopback + 明文 HTTP"（仅限隔离内网）
+  --web-audit-log <文件>        审计日志（默认 <日志目录>/web-audit.log，"-" 只写 stderr）
+  --web-max-clients <n>         SSE 客户端上限（默认 8）
+  --web-read-only               只读模式：禁止触发任务，只观察
+
+环境变量: RBACKUP_WEB_TOKEN / RBACKUP_WEB_TOKEN_FILE / RBACKUP_WEB_ADDR
+安全默认: 监听非 loopback 地址必须 token + TLS，否则拒绝启动。
+`, Version)
+}
+
 func NewApp() *App {
 	configPath := findConfigPath()
 	scriptPath := findScriptPath()
 
+	// 环境变量先于命令行参数（命令行可覆盖）
+	if v := os.Getenv("RBACKUP_WEB_TOKEN"); v != "" {
+		webOpts.Token = v
+	}
+	if v := os.Getenv("RBACKUP_WEB_TOKEN_FILE"); v != "" {
+		webOpts.TokenFile = v
+	}
+	if v := os.Getenv("RBACKUP_WEB_ADDR"); v != "" {
+		webOpts.Addr = v
+	}
+
 	for i := 1; i < len(os.Args); i++ {
 		switch os.Args[i] {
 		case "-c", "--config":
-			if i+1 < len(os.Args) {
-				configPath = expandTilde(os.Args[i+1])
-				i++
+			if v := argString(os.Args, &i); v != "" {
+				configPath = expandTilde(v)
 			}
 		case "-s", "--script":
-			if i+1 < len(os.Args) {
-				scriptPath = expandTilde(os.Args[i+1])
-				i++
+			if v := argString(os.Args, &i); v != "" {
+				scriptPath = expandTilde(v)
+			}
+		case "-h", "--help":
+			usage()
+			os.Exit(0)
+		case "--web":
+			webMode = true
+		case "--web-addr":
+			webOpts.Addr = argString(os.Args, &i)
+		case "--web-token":
+			webOpts.Token = argString(os.Args, &i)
+		case "--web-token-file":
+			webOpts.TokenFile = argString(os.Args, &i)
+		case "--web-tls-cert":
+			webOpts.TLSCert = argString(os.Args, &i)
+		case "--web-tls-key":
+			webOpts.TLSKey = argString(os.Args, &i)
+		case "--web-audit-log":
+			webOpts.AuditLog = argString(os.Args, &i)
+		case "--web-insecure-http":
+			webOpts.InsecureHTTP = true
+		case "--web-read-only":
+			webOpts.ReadOnly = true
+		case "--web-max-clients":
+			if v := argString(os.Args, &i); v != "" {
+				if n, err := strconv.Atoi(v); err == nil && n > 0 {
+					webOpts.MaxClients = n
+				}
 			}
 		}
 	}
@@ -2148,6 +2229,10 @@ func isErrorLine(line string) bool {
 // ---------- main ----------
 func main() {
 	a := NewApp()
+
+	if webMode {
+		os.Exit(runWebCLI(a.scriptPath, a.configPath, webOpts))
+	}
 
 	if debugKeys {
 		fmt.Fprintf(os.Stderr, "[DEBUG] version=%s git=%s build=%s\n",

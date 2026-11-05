@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type TaskStats struct {
@@ -123,6 +124,7 @@ func streamExec(ctx context.Context, scriptPath string, args []string, name stri
 
 	fullArgs := append([]string{scriptPath}, args...)
 	cmd := exec.CommandContext(ctx, bash, fullArgs...)
+	setProcessGroup(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -138,6 +140,23 @@ func streamExec(ctx context.Context, scriptPath string, args []string, name stri
 	if err := cmd.Start(); err != nil {
 		result.Err = err
 		return result
+	}
+
+	// 取消/超时时终止整个进程组：CommandContext 只会杀 bash，rsync 等子进程可能残留。
+	done := make(chan struct{})
+	if ctx != nil {
+		go func() {
+			select {
+			case <-ctx.Done():
+				terminateProcessGroup(cmd.Process)
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					forceKillProcessGroup(cmd.Process)
+				}
+			case <-done:
+			}
+		}()
 	}
 
 	var (
@@ -172,11 +191,14 @@ func streamExec(ctx context.Context, scriptPath string, args []string, name stri
 
 	wg.Wait()
 
-	if err := cmd.Wait(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+	waitErr := cmd.Wait()
+	close(done)
+
+	if waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			result.ExitCode = exitErr.ExitCode()
 		} else {
-			result.Err = err
+			result.Err = waitErr
 		}
 	} else {
 		result.ExitCode = 0
