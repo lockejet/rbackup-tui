@@ -405,6 +405,7 @@ Web 选项:
   --web-gen-totp                生成 TOTP secret 与 otpauth URI（终端里显示二维码）
   --web-show-totp-qr            显示"现有" TOTP secret 的二维码（不轮换）
   --web-show-totp-code          用现有 secret 计算当前动态码（仅排查用）
+  --web-check-totp-code <码>    校验一个动态码是否与 secret/时钟匹配（仅排查用）
 
 环境变量: RBACKUP_WEB_TOKEN / RBACKUP_WEB_TOKEN_FILE / RBACKUP_WEB_ADDR
 安全默认: 监听非 loopback 地址必须 token + TLS，否则拒绝启动；
@@ -541,6 +542,11 @@ func parseCLI(args []string) (configPath, scriptPath string, err error) {
 			os.Exit(runShowTOTPCLI(webOpts.TOTPSecretFile, webOpts.User))
 		case "--web-show-totp-code":
 			os.Exit(runShowTOTPCodeCLI(webOpts.TOTPSecretFile))
+		case "--web-check-totp-code":
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
+			}
+			os.Exit(runCheckTOTPCodeCLI(webOpts.TOTPSecretFile, v))
 		case "--web-max-clients":
 			if v, err = argValue(args, &i, args[i]); err != nil {
 				return "", "", err

@@ -357,3 +357,33 @@ func runShowTOTPCodeCLI(secretFile string) int {
 	fmt.Fprintln(os.Stderr, "      修改 secret/密码/token 文件后，运行中的服务必须重启才会生效。")
 	return 0
 }
+
+// runCheckTOTPCodeCLI 对应 --web-check-totp-code：校验一个动态码是否与当前 secret/时钟匹配。
+func runCheckTOTPCodeCLI(secretFile, code string) int {
+	if secretFile == "" {
+		secretFile = defaultTOTPSecretFile()
+	}
+	b, err := os.ReadFile(secretFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "错误: 读取 TOTP secret 失败: %v\n", err)
+		return 1
+	}
+	secret, err := decodeTOTPSecret(string(b))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "错误: secret 格式不对: %v\n", err)
+		return 1
+	}
+	counter, ok := verifyTOTP(secret, code)
+	if !ok {
+		fmt.Println("不匹配")
+		fmt.Fprintln(os.Stderr, "可能原因：")
+		fmt.Fprintln(os.Stderr, "  1) App 里录的 secret 不是服务器上的这个（用 --web-show-totp-qr 重新扫码）")
+		fmt.Fprintln(os.Stderr, "  2) 服务器与手机时钟相差超过 30 秒")
+		fmt.Fprintf(os.Stderr, "  3) App 不是标准 TOTP（如专有的 QQ 令牌），不支持通用 TOTP\n")
+		fmt.Fprintf(os.Stderr, "服务器 secret 文件: %s\n", secretFile)
+		return 1
+	}
+	fmt.Printf("匹配（时间窗口 %d）——secret 与时钟一致，可以登录\n", counter)
+	fmt.Fprintln(os.Stderr, "提示：同一个动态码用过一次后会被拒绝（防重放），等下一个再试。")
+	return 0
+}
