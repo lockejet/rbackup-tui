@@ -7,10 +7,12 @@
 <title>rbackup-ui</title>
 <link rel="stylesheet" href="/style.css">
 <script>
-/* 尽早应用主题，避免闪烁 */
+/* 尽早应用主题/语言，避免闪烁 */
 try {
   var t = localStorage.getItem('rbtui-theme');
   if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  var l = localStorage.getItem('rbtui-lang');
+  if (l === 'zh' || l === 'en') document.documentElement.lang = l === 'zh' ? 'zh-CN' : 'en';
 } catch (e) {}
 </script>
 </head>
@@ -21,32 +23,35 @@ try {
   <form id="loginForm" class="login-card" autocomplete="off">
     <h1>
       <span>rbackup-ui <span id="loginVersion" class="ver"></span></span>
-      <button type="button" id="loginThemeBtn" class="theme-btn" title="切换主题（自动/亮/暗）">🌓</button>
+      <span class="hdr-btns">
+        <button type="button" id="loginLangBtn" class="theme-btn" data-i18n-title="lang.title">中</button>
+        <button type="button" id="loginThemeBtn" class="theme-btn" data-i18n-title="theme.title">🌓</button>
+      </span>
     </h1>
 
-    <p class="hint" id="loginHint">正在获取登录方式…</p>
+    <p class="hint" id="loginHint"></p>
 
     <div id="passwordFields" class="fields hidden">
-      <input id="userInput" name="username" placeholder="用户名" autocomplete="username"
+      <input id="userInput" name="username" data-i18n-ph="login.user" autocomplete="username"
              autocapitalize="off" autocorrect="off" spellcheck="false">
-      <input id="passInput" name="password" type="password" placeholder="密码" autocomplete="current-password">
+      <input id="passInput" name="password" type="password" data-i18n-ph="login.password" autocomplete="current-password">
     </div>
 
     <div id="tokenFields" class="fields hidden">
-      <input id="tokenInput" name="token" type="password" placeholder="token"
+      <input id="tokenInput" name="token" type="password" data-i18n-ph="login.token"
              autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false">
     </div>
 
     <div id="totpFields" class="fields hidden">
-      <p class="hint small">密码正确。请输入认证器 App 里的 6 位动态码：</p>
-      <input id="totpInput" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="123456"
+      <p class="hint small" data-i18n="login.totpHint"></p>
+      <input id="totpInput" inputmode="numeric" maxlength="12" data-i18n-ph="login.totpPlaceholder"
              autocomplete="one-time-code" class="totp-input">
     </div>
 
-    <button type="submit" class="primary" id="loginBtn">登录</button>
+    <button type="submit" class="primary" id="loginBtn" data-i18n="login.submit">登录</button>
     <p id="loginError" class="error hidden"></p>
     <p class="hint small" id="loginFoot"></p>
-    <p class="hint small"><button type="button" id="switchAuthBtn" class="link hidden">改用 token 登录</button></p>
+    <p class="hint small"><button type="button" id="switchAuthBtn" class="link hidden"></button></p>
   </form>
 </div>
 
@@ -56,48 +61,59 @@ try {
     <div class="brand">rbackup-ui <span id="version" class="ver"></span></div>
     <div class="meta" id="meta"></div>
     <div class="actions">
-      <button id="themeBtn" class="ghost theme-btn" title="切换主题（自动/亮/暗）">🌓</button>
-      <button id="reloadBtn" class="ghost" title="重新读取配置">重载</button>
-      <button id="logoutBtn" class="ghost">退出</button>
+      <button id="securityBtn" class="ghost" data-i18n="app.security">安全</button>
+      <button id="phoneBtn" class="ghost" data-i18n="app.phoneLogin">手机登录</button>
+      <button id="langBtn" class="ghost theme-btn" data-i18n-title="lang.title">中</button>
+      <button id="themeBtn" class="ghost theme-btn" data-i18n-title="theme.title">🌓</button>
+      <button id="reloadBtn" class="ghost" data-i18n="app.reload">重载</button>
+      <button id="logoutBtn" class="ghost" data-i18n="app.logout">退出</button>
     </div>
   </header>
 
   <div id="banner" class="banner hidden"></div>
+  <div id="enable2faBanner" class="banner info hidden">
+    <span id="enable2faText"></span>
+    <span class="banner-actions">
+      <button id="enable2faBtn" class="primary"></button>
+      <button id="enable2faLater" class="ghost"></button>
+    </span>
+  </div>
+  <div id="toast" class="toast hidden"></div>
 
   <section class="info" id="info"></section>
 
   <main class="layout">
     <section class="tasks card">
       <div class="card-head">
-        <h2>任务列表</h2>
+        <h2 data-i18n="tasks.title">任务列表</h2>
         <div class="toolbar">
-          <label class="chk"><input type="checkbox" id="selectAll"> 全选</label>
-          <button id="runBtn" class="primary">运行选中</button>
-          <button id="dryBtn">Dry-run 预览</button>
-          <button id="mountBtn">挂载检查</button>
-          <button id="cancelBtn" class="danger hidden">取消运行</button>
+          <label class="chk"><input type="checkbox" id="selectAll"> <span data-i18n="tasks.selectAll">全选</span></label>
+          <button id="runBtn" class="primary" data-i18n="tasks.run">运行选中</button>
+          <button id="dryBtn" data-i18n="tasks.dryRun">Dry-run 预览</button>
+          <button id="mountBtn" data-i18n="tasks.mountCheck">挂载检查</button>
+          <button id="cancelBtn" class="danger hidden" data-i18n="tasks.cancel">取消运行</button>
         </div>
       </div>
       <div class="table-wrap">
         <table id="taskTable">
           <thead><tr>
-            <th class="c-chk"></th><th>任务名</th><th class="c-src">源</th>
-            <th class="c-dst">目标</th><th class="c-gate">门禁</th><th class="c-danger">危险</th>
+            <th class="c-chk"></th><th data-i18n="tasks.colName">任务名</th><th class="c-src" data-i18n="tasks.colSrc">源</th>
+            <th class="c-dst" data-i18n="tasks.colDst">目标</th><th class="c-gate" data-i18n="tasks.colGate">门禁</th><th class="c-danger" data-i18n="tasks.colDanger">危险</th>
           </tr></thead>
           <tbody id="taskBody"></tbody>
         </table>
-        <p id="emptyHint" class="hint hidden">配置中没有任务，或配置加载失败。</p>
+        <p id="emptyHint" class="hint hidden" data-i18n="tasks.empty">配置中没有任务，或配置加载失败。</p>
       </div>
       <div id="taskCards" class="task-cards"></div>
     </section>
 
     <section class="log card">
       <div class="card-head">
-        <h2>运行日志</h2>
+        <h2 data-i18n="log.title">运行日志</h2>
         <div class="toolbar">
-          <span id="jobState" class="badge idle">空闲</span>
-          <button id="pauseBtn" class="ghost">暂停滚动</button>
-          <button id="clearBtn" class="ghost">清屏</button>
+          <span id="jobState" class="badge idle"></span>
+          <button id="pauseBtn" class="ghost" data-i18n="log.pause">暂停滚动</button>
+          <button id="clearBtn" class="ghost" data-i18n="log.clear">清屏</button>
         </div>
       </div>
       <pre id="log" class="log-body"></pre>
@@ -107,15 +123,86 @@ try {
   <footer id="stats" class="stats"></footer>
 </div>
 
-<!-- 确认弹窗 -->
+<!-- 确认执行弹窗 -->
 <div id="modal" class="modal hidden">
   <div class="modal-card">
-    <h3 id="modalTitle">确认执行</h3>
+    <h3 id="modalTitle" data-i18n="confirm.title">确认执行</h3>
     <div id="modalBody"></div>
     <div class="modal-actions">
-      <button id="modalCancel" class="ghost">取消</button>
-      <button id="modalOk" class="danger">确认执行</button>
+      <button id="modalCancel" class="ghost" data-i18n="common.cancel">取消</button>
+      <button id="modalOk" class="danger" data-i18n="confirm.ok">确认执行</button>
     </div>
+  </div>
+</div>
+
+<!-- 安全中心（2FA）弹窗 -->
+<div id="securityModal" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3 data-i18n="sec.title">安全</h3>
+      <button class="modal-close" id="secClose" data-i18n-title="common.close">✕</button>
+    </div>
+    <p id="secStatus" class="hint"></p>
+
+    <div id="secActions" class="sec-actions">
+      <button id="secSetupBtn" class="primary hidden" data-i18n="sec.setup">设置 2FA</button>
+      <button id="secRegenBtn" class="ghost hidden" data-i18n="sec.regen">重新生成备份码</button>
+      <button id="secDisableBtn" class="danger hidden" data-i18n="sec.disable">关闭 2FA</button>
+    </div>
+
+    <!-- 设置流程 -->
+    <div id="secSetup" class="hidden">
+      <p class="hint small" data-i18n="sec.setupHint"></p>
+      <div class="qr-wrap"><img id="secQr" alt="2FA QR" width="220" height="220"></div>
+      <p class="hint small"><span data-i18n="sec.manualSecret"></span> <code id="secSecret" class="secret"></code></p>
+      <input id="secCode" inputmode="numeric" maxlength="6" data-i18n-ph="sec.codePlaceholder" class="totp-input">
+      <div class="modal-actions">
+        <button id="secSetupCancel" class="ghost" data-i18n="common.cancel">取消</button>
+        <button id="secSetupConfirm" class="primary" data-i18n="sec.confirmSetup">确认绑定</button>
+      </div>
+    </div>
+
+    <!-- 需要动态码的操作（重生成备份码 / 关闭 2FA） -->
+    <div id="secVerify" class="hidden">
+      <p class="hint small" id="secVerifyHint"></p>
+      <input id="secVerifyCode" inputmode="numeric" maxlength="12" data-i18n-ph="sec.verifyPlaceholder" class="totp-input">
+      <div class="modal-actions">
+        <button id="secVerifyCancel" class="ghost" data-i18n="common.cancel">取消</button>
+        <button id="secVerifyOk" class="primary" data-i18n="common.confirm">确认</button>
+      </div>
+    </div>
+
+    <!-- 备份码一次性展示 -->
+    <div id="secBackupResult" class="hidden">
+      <p class="warn small" data-i18n="sec.backupOneTime"></p>
+      <ol id="secBackupList" class="backup-list"></ol>
+      <div class="modal-actions">
+        <button id="secBackupCopy" class="ghost" data-i18n="sec.copyCodes">复制</button>
+        <button id="secBackupDone" class="primary" data-i18n="common.done">完成</button>
+      </div>
+    </div>
+    <p id="secError" class="error hidden"></p>
+  </div>
+</div>
+
+<!-- 手机登录弹窗 -->
+<div id="phoneModal" class="modal hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3 data-i18n="phone.title">手机登录</h3>
+      <button class="modal-close" id="phoneClose" data-i18n-title="common.close">✕</button>
+    </div>
+    <p class="hint small" data-i18n="phone.hint"></p>
+    <div class="qr-wrap"><img id="phoneQr" alt="login QR" width="220" height="220"></div>
+    <div class="phone-url-row">
+      <code id="phoneUrl" class="secret"></code>
+      <button id="phoneCopy" class="ghost" data-i18n="phone.copy">复制</button>
+    </div>
+    <p class="hint small"><span data-i18n="phone.expires"></span> <b id="phoneExpiry">-</b></p>
+    <div class="modal-actions">
+      <button id="phoneNew" class="primary" data-i18n="phone.new">新链接</button>
+    </div>
+    <p id="phoneError" class="error hidden"></p>
   </div>
 </div>
 

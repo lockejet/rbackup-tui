@@ -404,13 +404,16 @@ Web 选项:
   --web-user <名称>             用户名（配合密码登录，默认 admin）
   --web-password-hash <哈希>    密码哈希（不推荐直接写在命令行）
   --web-password-hash-file <f>  密码哈希文件（推荐；先跑 --web-hash-password 生成）
-  --web-2fa <off|totp>          二次验证模式（默认 off；totp 需配合密码登录）
-  --web-totp-secret-file <f>    TOTP secret 文件（先跑 --web-gen-totp 生成）
+  --web-2fa <off|totp>          2FA 策略（默认 off；totp 需配合密码登录，认证器在 Web 安全页绑定）
+  --web-totp-secret-file <f>    TOTP secret 文件（可省略：在 Web 安全页扫码绑定后自动生成）
   --web-hash-password           交互式生成密码哈希后退出
   --web-gen-totp                生成 TOTP secret 与 otpauth URI（终端里显示二维码）
   --web-show-totp-qr            显示"现有" TOTP secret 的二维码（不轮换）
   --web-show-totp-code          用现有 secret 计算当前动态码（仅排查用）
   --web-check-totp-code <码>    校验一个动态码是否与 secret/时钟匹配（仅排查用）
+
+Web 界面内置：安全中心（绑定 2FA / 重新生成备份码 / 关闭 2FA）、手机扫码登录、
+中英文切换、亮/暗主题切换；未启用 2FA 时登录后会提示一键开启。
 
 环境变量: RBACKUP_WEB_TOKEN / RBACKUP_WEB_TOKEN_FILE / RBACKUP_WEB_ADDR
 安全默认: 监听非 loopback 地址必须 token + TLS，否则拒绝启动；

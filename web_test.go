@@ -803,3 +803,232 @@ func TestParseCLIAuditLogDash(t *testing.T) {
 		t.Fatalf("AuditLog 应为 -: %q", webOpts.AuditLog)
 	}
 }
+
+// ---------- Web 安全中心：2FA 自助管理 / 手机登录 / 二维码 ----------
+
+func totpAt(secretStr string, at time.Time) string {
+	secret, err := decodeTOTPSecret(secretStr)
+	if err != nil {
+		return ""
+	}
+	return totpCode(secret, at)
+}
+
+func totpNow(secretStr string) string { return totpAt(secretStr, time.Now()) }
+
+func newPasswordEnv(t *testing.T, twofa, secretFile string) *testEnv {
+	t.Helper()
+	// 隔离 HOME/XDG：默认 secret 路径会落到 ~/.config/rbackup-ui/web.totp
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("XDG_STATE_HOME", "")
+	hash, err := hashPassword("secret123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := webOptions{Addr: "127.0.0.1:0", User: "alice", PasswordHash: hash, TwoFA: twofa,
+		MaxClients: 8, SessionTTL: time.Hour}
+	if secretFile != "" {
+		o.TOTPSecretFile = secretFile
+	}
+	return newTestEnvAuth(t, o)
+}
+
+func TestWeb2FASelfSetup(t *testing.T) {
+	env := newPasswordEnv(t, "totp", "") // 初始没有 2FA：策略开启，未绑定
+
+	// 未绑定认证器时密码登录不应要求 2FA
+	code, r := env.postSession(t, map[string]string{"username": "alice", "password": "secret123"})
+	if code != http.StatusOK || r.TotpRequired || r.CSRF == "" {
+		t.Fatalf("未绑定时应直接登录: code=%d resp=%+v", code, r)
+	}
+	csrf := r.CSRF
+
+	code, data := env.do(t, http.MethodGet, "/api/2fa", nil, "")
+	if code != http.StatusOK {
+		t.Fatalf("GET /api/2fa: %d", code)
+	}
+	var st twofaStatusResp
+	_ = json.Unmarshal(data, &st)
+	if !st.Policy || st.Configured {
+		t.Fatalf("应为 policy=true configured=false: %+v", st)
+	}
+
+	code, data = env.do(t, http.MethodPost, "/api/2fa/setup", map[string]string{}, csrf)
+	if code != http.StatusOK {
+		t.Fatalf("setup: %d %s", code, data)
+	}
+	var setupResp struct {
+		Secret string `json:"secret"`
+		URI    string `json:"uri"`
+	}
+	if err := json.Unmarshal(data, &setupResp); err != nil || setupResp.Secret == "" || setupResp.URI == "" {
+		t.Fatalf("setup 响应异常: %s", data)
+	}
+	if !strings.HasPrefix(setupResp.URI, "otpauth://totp/") {
+		t.Fatalf("otpauth URI 异常: %s", setupResp.URI)
+	}
+
+	// 错误码 → 401
+	code, _ = env.do(t, http.MethodPost, "/api/2fa/setup/confirm",
+		map[string]string{"secret": setupResp.Secret, "code": "000000"}, csrf)
+	if code != http.StatusUnauthorized {
+		t.Fatalf("错误码应 401，got %d", code)
+	}
+
+	// 正确码 → 绑定成功 + 10 个备份码
+	code, data = env.do(t, http.MethodPost, "/api/2fa/setup/confirm",
+		map[string]string{"secret": setupResp.Secret, "code": totpNow(setupResp.Secret)}, csrf)
+	if code != http.StatusOK {
+		t.Fatalf("confirm: %d %s", code, data)
+	}
+	var confirmResp struct {
+		BackupCodes []string `json:"backupCodes"`
+	}
+	_ = json.Unmarshal(data, &confirmResp)
+	if len(confirmResp.BackupCodes) != backupCodeCount {
+		t.Fatalf("应返回 %d 个备份码: %v", backupCodeCount, confirmResp.BackupCodes)
+	}
+
+	_, data = env.do(t, http.MethodGet, "/api/2fa", nil, "")
+	_ = json.Unmarshal(data, &st)
+	if !st.Configured || st.BackupCodes != backupCodeCount {
+		t.Fatalf("绑定后状态异常: %+v", st)
+	}
+
+	// 新会话登录：需要 2FA，用备份码通过
+	env2 := newPasswordEnv(t, "totp", "")
+	_ = env2 // 仅确保 helper 可用；下面复用同一 env（会话与凭据共享服务端）
+	code, r = env.postSession(t, map[string]string{"username": "alice", "password": "secret123"})
+	if code != http.StatusOK || !r.TotpRequired {
+		t.Fatalf("绑定后应要求 2FA: code=%d resp=%+v", code, r)
+	}
+	code, data = env.do(t, http.MethodPost, "/api/session/totp",
+		map[string]string{"code": confirmResp.BackupCodes[0]}, "")
+	if code != http.StatusOK {
+		t.Fatalf("备份码登录应成功: %d %s", code, data)
+	}
+	_, data = env.do(t, http.MethodGet, "/api/2fa", nil, "")
+	_ = json.Unmarshal(data, &st)
+	if st.BackupCodes != backupCodeCount-1 {
+		t.Fatalf("备份码应被消耗 1 个，剩余 %d", st.BackupCodes)
+	}
+}
+
+func TestWeb2FABackupRegenAndDisable(t *testing.T) {
+	secretStr, err := newTOTPSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	secretFile := filepath.Join(dir, "web.totp")
+	if err := os.WriteFile(secretFile, []byte(secretStr), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := newPasswordEnv(t, "totp", secretFile)
+
+	code, r := env.postSession(t, map[string]string{"username": "alice", "password": "secret123"})
+	if code != http.StatusOK || !r.TotpRequired {
+		t.Fatalf("应要求 2FA: %d %+v", code, r)
+	}
+	code, data := env.do(t, http.MethodPost, "/api/session/totp", map[string]string{"code": totpNow(secretStr)}, "")
+	if code != http.StatusOK {
+		t.Fatalf("2FA 登录失败: %d %s", code, data)
+	}
+	var sr sessionResp
+	_ = json.Unmarshal(data, &sr)
+	csrf := sr.CSRF
+
+	// 用下一个时间窗的码重新生成备份码（避免重放）
+	next := totpAt(secretStr, time.Now().Add(30*time.Second))
+	code, data = env.do(t, http.MethodPost, "/api/2fa/backup-codes", map[string]string{"code": next}, csrf)
+	if code != http.StatusOK {
+		t.Fatalf("重新生成备份码失败: %d %s", code, data)
+	}
+	var regen struct {
+		BackupCodes []string `json:"backupCodes"`
+	}
+	_ = json.Unmarshal(data, &regen)
+	if len(regen.BackupCodes) != backupCodeCount {
+		t.Fatalf("备份码数量异常: %d", len(regen.BackupCodes))
+	}
+
+	// 关闭 2FA：用刚生成的备份码（同一 30s 窗口内动态码会触发防重放）
+	code, data = env.do(t, http.MethodPost, "/api/2fa/disable", map[string]string{"code": regen.BackupCodes[0]}, csrf)
+	if code != http.StatusOK {
+		t.Fatalf("关闭 2FA 失败: %d %s", code, data)
+	}
+	_, data = env.do(t, http.MethodGet, "/api/2fa", nil, "")
+	var st twofaStatusResp
+	_ = json.Unmarshal(data, &st)
+	if !st.Policy || st.Configured {
+		t.Fatalf("关闭后应为 policy=true configured=false: %+v", st)
+	}
+	// 关闭后密码登录不再需要 2FA
+	code, r = env.postSession(t, map[string]string{"username": "alice", "password": "secret123"})
+	if code != http.StatusOK || r.TotpRequired {
+		t.Fatalf("关闭后应直接登录: code=%d resp=%+v", code, r)
+	}
+}
+
+func TestWebPhoneLogin(t *testing.T) {
+	env := newTestEnv(t, nil) // token 模式，newTestEnv 已登录
+	code, data := env.do(t, http.MethodPost, "/api/phone-login", map[string]string{}, env.csrf)
+	if code != http.StatusOK {
+		t.Fatalf("创建手机登录链接失败: %d %s", code, data)
+	}
+	var link struct {
+		URL       string `json:"url"`
+		ExpiresIn int    `json:"expiresIn"`
+	}
+	_ = json.Unmarshal(data, &link)
+	if !strings.Contains(link.URL, "#t=") || link.ExpiresIn <= 0 {
+		t.Fatalf("链接响应异常: %s", data)
+	}
+	tok := link.URL[strings.Index(link.URL, "#t=")+3:]
+
+	// 新客户端（模拟手机）用一次性 token 换会话
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Jar: jar, Timeout: 10 * time.Second}
+	req, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/api/session/phone",
+		strings.NewReader(`{"token":"`+tok+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	res, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("手机登录兑换失败: %d", res.StatusCode)
+	}
+	// 同一 token 不能再次使用
+	req2, _ := http.NewRequest(http.MethodPost, env.ts.URL+"/api/session/phone",
+		strings.NewReader(`{"token":"`+tok+`"}`))
+	req2.Header.Set("Content-Type", "application/json")
+	res2, err := client.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res2.Body.Close()
+	if res2.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("一次性链接应失效，got %d", res2.StatusCode)
+	}
+}
+
+func TestWebQREndpoint(t *testing.T) {
+	env := newTestEnv(t, nil)
+	code, data := env.do(t, http.MethodGet, "/api/qr.png?data=hello", nil, "")
+	if code != http.StatusOK || len(data) < 100 {
+		t.Fatalf("二维码接口异常: %d len=%d", code, len(data))
+	}
+	// 未登录不可访问
+	jar, _ := cookiejar.New(nil)
+	res, err := (&http.Client{Jar: jar, Timeout: 10 * time.Second}).Get(env.ts.URL + "/api/qr.png?data=hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("未登录访问二维码应 401，got %d", res.StatusCode)
+	}
+}

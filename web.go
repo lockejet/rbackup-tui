@@ -66,7 +66,11 @@ type webOptions struct {
 	PasswordHashFile string
 	TwoFA            string // off | totp
 	TOTPSecretFile   string
+	BackupCodesFile  string
 	totpSecret       []byte
+	totpSecretFile   string
+	backupCodesFile  string
+	backupHashes     []string
 }
 
 func defaultWebOptions() webOptions {
@@ -107,17 +111,35 @@ func (o *webOptions) loadCredentials() error {
 	if o.PasswordHash == "" {
 		o.PasswordHash = os.Getenv("RBACKUP_WEB_PASSWORD_HASH")
 	}
+	if o.TwoFA == "" {
+		o.TwoFA = "off"
+	}
 	if o.TOTPSecretFile != "" {
-		b, err := os.ReadFile(o.TOTPSecretFile)
-		if err != nil {
+		o.totpSecretFile = o.TOTPSecretFile
+	} else if o.TwoFA == "totp" {
+		o.totpSecretFile = defaultTOTPSecretFile()
+	}
+	if o.totpSecretFile != "" {
+		b, err := os.ReadFile(o.totpSecretFile)
+		switch {
+		case err == nil:
+			secret, derr := decodeTOTPSecret(string(b))
+			if derr != nil {
+				return fmt.Errorf("TOTP secret 格式错误: %w", derr)
+			}
+			o.totpSecret = secret
+		case errors.Is(err, os.ErrNotExist):
+			// 尚未配置：允许启动，由 Web 安全页自助设置
+		default:
 			return fmt.Errorf("读取 TOTP secret 文件失败: %w", err)
 		}
-		secret, err := decodeTOTPSecret(string(b))
-		if err != nil {
-			return fmt.Errorf("TOTP secret 格式错误: %w", err)
-		}
-		o.totpSecret = secret
 	}
+	if o.BackupCodesFile != "" {
+		o.backupCodesFile = o.BackupCodesFile
+	} else if o.totpSecretFile != "" {
+		o.backupCodesFile = o.totpSecretFile + ".backup-codes"
+	}
+	o.backupHashes = loadBackupHashes(o.backupCodesFile)
 	return nil
 }
 
@@ -152,9 +174,7 @@ func (o *webOptions) validate() error {
 		if o.PasswordHash == "" {
 			return errors.New("启用 TOTP 需要同时配置密码登录（--web-password-hash-file）")
 		}
-		if len(o.totpSecret) == 0 {
-			return errors.New("启用 TOTP 需要 --web-totp-secret-file（用 --web-gen-totp 生成）")
-		}
+		// secret 文件可以不在启动时提供：安全页可自助设置（首次/重新绑定）
 	}
 	hasCred := o.Token != "" || o.PasswordHash != ""
 	if !loop {
@@ -891,14 +911,16 @@ type webServer struct {
 	limiter    *attemptLimiter
 	handler    http.Handler
 
-	// 认证扩展
-	user         string
-	passwordHash string
-	totpSecret   []byte
-	totpEnabled  bool
-	pending      *pending2FA
-	totpMu       sync.Mutex
-	totpLast     int64
+	// 认证扩展：凭据可在运行时由 2FA 管理接口更新
+	credMu   sync.RWMutex
+	cred     credState
+	pending  *pending2FA
+	totpMu   sync.Mutex
+	totpLast int64
+
+	// 手机扫码登录：一次性链接
+	phoneMu    sync.Mutex
+	phoneLinks map[string]*phoneLink
 }
 
 func newWebServer(o webOptions, scriptPath, configPath string) (*webServer, error) {
@@ -930,18 +952,25 @@ func newWebServer(o webOptions, scriptPath, configPath string) (*webServer, erro
 		hmacSecret = randToken(32)
 	}
 	s := &webServer{
-		opts:         o,
-		scriptPath:   scriptPath,
-		configPath:   configPath,
-		auth:         newWebAuth(hmacSecret, o.SessionTTL),
-		hub:          newSSEHub(o.MaxClients),
-		audit:        audit,
-		limiter:      newAttemptLimiter(),
-		user:         o.User,
-		passwordHash: o.PasswordHash,
-		totpSecret:   o.totpSecret,
-		totpEnabled:  o.TwoFA == "totp",
-		pending:      newPending2FA(),
+		opts:       o,
+		scriptPath: scriptPath,
+		configPath: configPath,
+		auth:       newWebAuth(hmacSecret, o.SessionTTL),
+		hub:        newSSEHub(o.MaxClients),
+		audit:      audit,
+		limiter:    newAttemptLimiter(),
+		pending:    newPending2FA(),
+		phoneLinks: map[string]*phoneLink{},
+		cred: credState{
+			user:         o.User,
+			passwordHash: o.PasswordHash,
+			twofaPolicy:  o.TwoFA == "totp",
+			totpSecret:   o.totpSecret,
+			totpEnabled:  o.TwoFA == "totp" && len(o.totpSecret) > 0,
+			backupHashes: o.backupHashes,
+			secretFile:   o.totpSecretFile,
+			backupFile:   o.backupCodesFile,
+		},
 	}
 	s.jobs = newWebJobs(scriptPath, configPath, s.hub, audit)
 	s.handler = s.routes()
@@ -1049,6 +1078,14 @@ func (s *webServer) routes() http.Handler {
 	mux.HandleFunc("/api/authinfo", s.handleAuthInfo)
 	mux.HandleFunc("/api/session", s.handleSession)
 	mux.HandleFunc("/api/session/totp", s.handleTOTP)
+	mux.HandleFunc("/api/session/phone", s.handlePhoneSession)
+	mux.HandleFunc("/api/2fa", s.requireAuth(s.handle2FA))
+	mux.HandleFunc("/api/2fa/setup", s.requireAuth(s.csrf(s.handle2FASetup)))
+	mux.HandleFunc("/api/2fa/setup/confirm", s.requireAuth(s.csrf(s.handle2FASetupConfirm)))
+	mux.HandleFunc("/api/2fa/backup-codes", s.requireAuth(s.csrf(s.handle2FABackupCodes)))
+	mux.HandleFunc("/api/2fa/disable", s.requireAuth(s.csrf(s.handle2FADisable)))
+	mux.HandleFunc("/api/qr.png", s.requireAuth(s.handleQR))
+	mux.HandleFunc("/api/phone-login", s.requireAuth(s.csrf(s.handlePhoneLink)))
 	mux.HandleFunc("/api/state", s.requireAuth(s.handleState))
 	mux.HandleFunc("/api/jobs", s.requireAuth(s.csrf(s.handleJobs)))
 	mux.HandleFunc("/api/jobs/current", s.requireAuth(s.handleCurrent))
@@ -1089,14 +1126,16 @@ type authInfoResp struct {
 }
 
 // tokenFree：既没有 token 也没有密码（仅 loopback 允许），本机免登录。
-func (s *webServer) tokenFree() bool { return s.opts.Token == "" && s.passwordHash == "" }
+func (s *webServer) tokenFree() bool {
+	return s.opts.Token == "" && s.creds().passwordHash == ""
+}
 
 func (s *webServer) authMethods() []string {
 	out := []string{}
 	if s.opts.Token != "" {
 		out = append(out, "token")
 	}
-	if s.passwordHash != "" {
+	if s.creds().passwordHash != "" {
 		out = append(out, "password")
 	}
 	if len(out) == 0 {
@@ -1116,7 +1155,7 @@ func (s *webServer) issueSession(w http.ResponseWriter, r *http.Request) session
 		Secure:   r.TLS != nil,
 		MaxAge:   int(s.opts.SessionTTL.Seconds()),
 	})
-	s.audit.log("session.open", clientIP(r), r.UserAgent(), map[string]any{"twofa": s.totpEnabled})
+	s.audit.log("session.open", clientIP(r), r.UserAgent(), map[string]any{"twofa": s.creds().totpEnabled})
 	return sessionResp{CSRF: csrf, Version: Version, ReadOnly: s.opts.ReadOnly, TokenFree: s.tokenFree()}
 }
 
@@ -1139,9 +1178,10 @@ func (s *webServer) handleAuthInfo(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusMethodNotAllowed, "method", "不支持的方法")
 		return
 	}
+	cred := s.creds()
 	jsonWrite(w, http.StatusOK, authInfoResp{
 		Methods:  s.authMethods(),
-		TOTP:     s.totpEnabled,
+		TOTP:     cred.totpEnabled,
 		ReadOnly: s.opts.ReadOnly,
 		Version:  Version,
 	})
@@ -1174,16 +1214,17 @@ func (s *webServer) handleSession(w http.ResponseWriter, r *http.Request) {
 		req.Token = strings.TrimSpace(req.Token)
 		req.Username = strings.TrimSpace(req.Username)
 		// 密码登录（+ 可选 TOTP）
-		if s.passwordHash != "" && (req.Username != "" || req.Password != "") {
-			userOK := subtle.ConstantTimeCompare([]byte(req.Username), []byte(s.user)) == 1
-			passOK := verifyPassword(s.passwordHash, req.Password)
+		cred := s.creds()
+		if cred.passwordHash != "" && (req.Username != "" || req.Password != "") {
+			userOK := subtle.ConstantTimeCompare([]byte(req.Username), []byte(cred.user)) == 1
+			passOK := verifyPassword(cred.passwordHash, req.Password)
 			if !userOK || !passOK {
 				s.limiter.fail(ip)
 				s.audit.log("session.fail_password", ip, r.UserAgent(), nil)
 				jsonErr(w, http.StatusUnauthorized, "invalid_credentials", "用户名或密码不正确")
 				return
 			}
-			if s.totpEnabled {
+			if cred.totpEnabled {
 				id := s.pending.create()
 				s.setPendingCookie(w, r, id)
 				s.audit.log("session.pending_2fa", ip, r.UserAgent(), nil)
@@ -1229,7 +1270,7 @@ func (s *webServer) handleTOTP(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusForbidden, "csrf", "请求来源不被允许")
 		return
 	}
-	if !s.totpEnabled {
+	if !s.creds().totpEnabled {
 		jsonErr(w, http.StatusBadRequest, "2fa_disabled", "未启用二次验证")
 		return
 	}
@@ -1251,28 +1292,22 @@ func (s *webServer) handleTOTP(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "请求体格式错误")
 		return
 	}
-	counter, ok := verifyTOTP(s.totpSecret, req.Code)
+	method, ok, reused := s.verifySecondFactor(req.Code)
 	if !ok {
 		s.pending.fail(c.Value)
 		s.limiter.fail(ip)
+		if reused {
+			s.audit.log("totp.replay", ip, r.UserAgent(), nil)
+			jsonErr(w, http.StatusUnauthorized, "code_reused", "动态码已被使用，请等待下一个")
+			return
+		}
 		s.audit.log("totp.fail", ip, r.UserAgent(), nil)
-		jsonErr(w, http.StatusUnauthorized, "invalid_code", "动态码不正确")
-		return
-	}
-	s.totpMu.Lock()
-	reused := counter <= s.totpLast
-	if !reused {
-		s.totpLast = counter
-	}
-	s.totpMu.Unlock()
-	if reused {
-		s.audit.log("totp.replay", ip, r.UserAgent(), nil)
-		jsonErr(w, http.StatusUnauthorized, "code_reused", "动态码已被使用，请等待下一个")
+		jsonErr(w, http.StatusUnauthorized, "invalid_code", "动态码或备份码不正确")
 		return
 	}
 	s.pending.consume(c.Value)
 	http.SetCookie(w, &http.Cookie{Name: webPendingCookie, Value: "", Path: "/api", MaxAge: -1, HttpOnly: true})
-	s.audit.log("totp.ok", ip, r.UserAgent(), nil)
+	s.audit.log("totp.ok", ip, r.UserAgent(), map[string]any{"method": method})
 	jsonWrite(w, http.StatusOK, s.issueSession(w, r))
 }
 
@@ -1597,12 +1632,15 @@ func (s *webServer) serve() error {
 		host = "0.0.0.0"
 	}
 	fmt.Fprintf(os.Stderr, "rbackup-ui web UI: %s://%s:%s  (配置: %s)\n", scheme, host, port, s.configPath)
+	cred := s.creds()
 	switch {
-	case s.totpEnabled:
+	case cred.totpEnabled:
 		fmt.Fprintln(os.Stderr, "认证: 密码 + TOTP 二次验证（token 登录可作为恢复方式）")
-	case s.passwordHash != "" && s.opts.Token != "":
+	case cred.twofaPolicy:
+		fmt.Fprintln(os.Stderr, "认证: 密码（2FA 策略已开启但尚未绑定认证器，请在 Web 安全页设置）")
+	case cred.passwordHash != "" && s.opts.Token != "":
 		fmt.Fprintln(os.Stderr, "认证: token / 用户名密码")
-	case s.passwordHash != "":
+	case cred.passwordHash != "":
 		fmt.Fprintln(os.Stderr, "认证: 用户名密码")
 	case s.opts.Token != "":
 		fmt.Fprintln(os.Stderr, "认证: token")

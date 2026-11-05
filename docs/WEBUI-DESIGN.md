@@ -598,3 +598,44 @@ rbackup.example.com {
 `web_test.go` 覆盖：密码哈希生成/校验、RFC 6238 测试向量、密码登录成功/失败、
 TOTP 流程（要求 2FA → 未完成 401 → 错误码 401 → 正确码 200）、token 跳过 TOTP、
 CLI 新参数解析、`/api/authinfo`；`web/app.js` 在 CI 里跑 `node --check`。
+
+---
+
+## 16. 实现补充（2026-11-05）：2FA 自助管理 / 手机扫码登录 / i18n / 日志配色
+
+### 16.1 2FA 自助管理（服务端新增接口）
+
+启动参数 `--web-2fa totp` 表示"策略开启"，secret 文件可不存在（初始状态）；
+若存在 `--web-totp-secret-file`（或默认 `$XDG_CONFIG_HOME/rbackup-ui/web.totp`）则自动加载。
+未绑定认证器时密码登录不要求 2FA，登录后前端提示一键启用。
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/2fa` | 状态：`{policy, configured, backupCodes}` |
+| `POST /api/2fa/setup` | 生成新 secret + otpauth URI（不落盘） |
+| `POST /api/2fa/setup/confirm` | 校验 6 位码 → 原子写入 secret、生成 10 个备份码（SHA-256 哈希存储） |
+| `POST /api/2fa/backup-codes` | 需当前动态码/备份码；重新生成备份码 |
+| `POST /api/2fa/disable` | 需当前动态码/备份码；删除 secret 与备份码文件 |
+
+备份码文件默认为 secret 文件 + `.backup-codes`（0600，逐行 SHA-256）；用过的备份码会被删除。
+动态码统一 ±1 时间窗、防重放；管理类操作共用同一重放计数。
+
+### 16.2 手机扫码登录
+
+- `POST /api/phone-login`（需登录 + CSRF）：生成 32 字节一次性 token，内存仅存 SHA-256 哈希，
+  返回 `{url, expiresIn}`；URL 为 `<scheme>://<host>/#t=<token>`，Host 为 loopback 时自动换成局域网 IPv4。
+- `POST /api/session/phone` `{token}`：校验未过期/未使用 → 标记已用 → 下发会话；单次有效。
+- TTL 120s，最多 8 个并发链接；扫码页 JS 读取 `location.hash` 后立即 `history.replaceState` 清除。
+
+### 16.3 服务端二维码
+
+`GET /api/qr.png?data=...`（需登录）：用 rsc.io/qr 生成二维码，纯 Go 渲染 PNG（静区 4、scale 6），
+供"2FA 绑定"与"手机登录"弹窗的 `<img>` 直接使用；不依赖外部二维码服务。
+
+### 16.4 前端：i18n / 主题 / 日志配色
+
+- i18n：`data-i18n` / `data-i18n-ph` / `data-i18n-title` + 前端字典（zh/en），
+  错误码本地化（`err.*`）；语言存 `localStorage('rbtui-lang')`，默认跟随浏览器。
+- 主题：`data-theme` + CSS 变量，三态（auto/light/dark）；运行日志背景改为 `var(--card)`，
+  与任务列表一致，不再固定深色。
+- 安全中心/手机登录/备份码/二维码均为弹窗，移动端自适应。
