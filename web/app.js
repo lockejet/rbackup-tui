@@ -191,13 +191,13 @@ $('loginForm').addEventListener('submit', async (ev) => {
       enterApp(await api('POST', '/api/session', {}));
     } else if (S.mode === 'password') {
       const r = await api('POST', '/api/session', {
-        username: $('userInput').value,
+        username: $('userInput').value.trim(),
         password: $('passInput').value,
       });
       if (r.totpRequired) { showTotpStep(); return; }
       enterApp(r);
     } else {
-      enterApp(await api('POST', '/api/session', { token: $('tokenInput').value }));
+      enterApp(await api('POST', '/api/session', { token: $('tokenInput').value.trim() }));
     }
   } catch (e) {
     showLoginError(e.message || '登录失败');

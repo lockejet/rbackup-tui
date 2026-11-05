@@ -1169,6 +1169,9 @@ func (s *webServer) handleSession(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, http.StatusBadRequest, "bad_request", "请求体格式错误")
 			return
 		}
+		// 粘贴时容易带上首尾空白/换行：token 与用户名做规范化（密码保持原样）
+		req.Token = strings.TrimSpace(req.Token)
+		req.Username = strings.TrimSpace(req.Username)
 		// 密码登录（+ 可选 TOTP）
 		if s.passwordHash != "" && (req.Username != "" || req.Password != "") {
 			userOK := subtle.ConstantTimeCompare([]byte(req.Username), []byte(s.user)) == 1

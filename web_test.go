@@ -730,3 +730,12 @@ func TestParseCLIAuthFlags(t *testing.T) {
 		t.Fatal("--web-2fa 缺值应报错")
 	}
 }
+
+func TestWebTokenWhitespaceTolerant(t *testing.T) {
+	env := newTestEnv(t, nil)
+	// 模拟从终端复制时带上首尾空白/换行
+	code, r := env.postSession(t, map[string]string{"token": "  " + testToken + "\n"})
+	if code != http.StatusOK || r.CSRF == "" {
+		t.Fatalf("带首尾空白的 token 应被接受: code=%d resp=%+v", code, r)
+	}
+}
