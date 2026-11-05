@@ -361,7 +361,12 @@ var (
 
 // argValue 取形如 `--flag value` 的值；缺失或下一个参数是另一个选项时报错。
 func argValue(args []string, i *int, flag string) (string, error) {
-	if *i+1 >= len(args) || strings.HasPrefix(args[*i+1], "-") {
+	if *i+1 >= len(args) {
+		return "", fmt.Errorf("%s 缺少参数值", flag)
+	}
+	next := args[*i+1]
+	// "-" 是常见约定（如 --web-audit-log - 表示 stderr），其余以 - 开头视为漏值
+	if next != "-" && strings.HasPrefix(next, "-") {
 		return "", fmt.Errorf("%s 缺少参数值", flag)
 	}
 	*i++

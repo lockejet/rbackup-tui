@@ -790,3 +790,16 @@ func TestOTPAuthURI(t *testing.T) {
 		t.Fatalf("otpauth URI 异常: %s", uri)
 	}
 }
+
+func TestParseCLIAuditLogDash(t *testing.T) {
+	oldMode, oldOpts := webMode, webOpts
+	defer func() { webMode, webOpts = oldMode, oldOpts }()
+	webMode = false
+	webOpts = defaultWebOptions()
+	if _, _, err := parseCLI([]string{"rbackup-ui", "--web-audit-log", "-"}); err != nil {
+		t.Fatalf("--web-audit-log - 应合法: %v", err)
+	}
+	if webOpts.AuditLog != "-" {
+		t.Fatalf("AuditLog 应为 -: %q", webOpts.AuditLog)
+	}
+}
