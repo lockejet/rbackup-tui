@@ -37,6 +37,7 @@ rbackup.sh 的终端用户界面（TUI），用于管理和执行多任务 rsync
   - [命令行参数](#命令行参数)
   - [脚本路径查找顺序](#脚本路径查找顺序)
   - [典型流程](#典型流程)
+- [Windows（原生：Git Bash / MSYS2）](#windows原生git-bash--msys2)
 - [Web UI（可选）](#web-ui可选)
   - [启动](#启动-1)
   - [参数](#参数)
