@@ -101,3 +101,43 @@ func TestResolveLogDirIgnoresEmptyConfig(t *testing.T) {
 		t.Fatalf("resolveLogDir 应回退到应用日志目录，got %q", got)
 	}
 }
+
+func TestToMSYSPath(t *testing.T) {
+	cases := map[string]string{
+		`C:\Users\admin\rbackup.sh`: "/c/Users/admin/rbackup.sh",
+		`D:\a b\c.ini`:              "/d/a b/c.ini",
+		`/already/posix`:            "/already/posix",
+		`\\server\share\x`:          `\\server\share\x`,
+		``:                          ``,
+	}
+	for in, want := range cases {
+		if got := toMSYSPath(in); got != want {
+			t.Fatalf("toMSYSPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestParseCLIBashAndDoctor(t *testing.T) {
+	oldMode, oldOpts := webMode, webOpts
+	oldBash, oldDoctor := bashPathOverride, doctorMode
+	defer func() {
+		webMode, webOpts = oldMode, oldOpts
+		bashPathOverride, doctorMode = oldBash, oldDoctor
+	}()
+	webMode = false
+	webOpts = defaultWebOptions()
+	bashPathOverride, doctorMode = "", false
+
+	if _, _, err := parseCLI([]string{"rbackup-ui", "--bash", `C:\Program Files\Git\bin\bash.exe`}); err != nil {
+		t.Fatalf("--bash 解析失败: %v", err)
+	}
+	if bashPathOverride != `C:\Program Files\Git\bin\bash.exe` {
+		t.Fatalf("bashPathOverride = %q", bashPathOverride)
+	}
+	if _, _, err := parseCLI([]string{"rbackup-ui", "--doctor"}); err != nil || !doctorMode {
+		t.Fatalf("--doctor 解析失败: err=%v doctor=%v", err, doctorMode)
+	}
+	if _, _, err := parseCLI([]string{"rbackup-ui", "--bash"}); err == nil {
+		t.Fatal("--bash 缺值应报错")
+	}
+}

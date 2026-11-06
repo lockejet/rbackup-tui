@@ -608,6 +608,38 @@ rsync 只允许 `--chown` 出现一次。可以放在：
 
 ---
 
+## Windows（原生：Git Bash / MSYS2）
+
+TUI 与 Web UI 都是同一个单二进制，Windows 上可原生运行；备份任务由 bash 执行
+（Git for Windows 或 MSYS2 提供 bash，rsync 需单独安装）。
+
+```powershell
+# 1) 依赖：Git for Windows（自带 bash/ssh）+ MSYS2 的 rsync
+#    MSYS2 中执行： pacman -S rsync
+#    然后把 C:\msys64\usr\bin 加入 PATH（或复制 rsync.exe 到 PATH 中）
+
+# 2) 安装（PowerShell 一键；也可下载 windows-amd64.zip 解压）
+irm https://github.com/lockejet/rbackup-ui/releases/latest/download/install.ps1 | iex
+# 可选参数：-AddToPath  -Version v1.1.12  -InstallDir DIR  -DryRun  -Uninstall
+
+# 3) 自检：bash / rsync / ssh / 配置 / 脚本 / 日志路径
+rbackup-ui.exe --doctor
+
+# 4) 运行
+rbackup-ui.exe                                    # TUI（Windows Terminal / MSYS2 均可）
+rbackup-ui.exe --web                              # Web UI → http://127.0.0.1:30031
+```
+
+- 默认路径：配置 `%APPDATA%\rbackup-ui\config.ini`（兼容 `%USERPROFILE%\.config\rbackup-ui\`）；
+  日志 `%LOCALAPPDATA%\rbackup-ui\Logs`。
+- 找不到 bash 时可用 `--bash "C:\Program Files\Git\bin\bash.exe"` 或环境变量 `RBACKUP_BASH` 指定；
+  程序会把传给 bash 的 Windows 路径自动转换成 MSYS2 的 `/c/...` 形式。
+- 局域网/手机访问：`--web-addr 0.0.0.0:30031`（仍需 token+TLS 或内网 `--web-insecure-http`），
+  并在 Windows 防火墙放行该端口；手机登录二维码使用你当前访问 Web 的地址生成。
+- 开机自启：用「任务计划程序」在登录时运行 `rbackup-ui.exe --web ...`。
+- **WSL2 备选**：数据/密钥都在 WSL 里时，直接在 WSL 内运行 Linux 版最省事；
+  Windows 浏览器用 `http://localhost:30031`，局域网访问需做 WSL 端口转发并放行防火墙。
+
 ## Web UI（可选）
 
 同一个二进制可以用 `--web` 启动内嵌 Web 界面，浏览器/手机访问；TUI 与 Web 互斥启动。

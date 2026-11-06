@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -69,13 +70,21 @@ func parseStatsLine(line string) *TaskStats {
 	return s
 }
 
-// ---------- 查找 bash ----------
-func findBash() string {
+// ---------- 查找 bash / 运行环境适配 ----------
+
+// bashPathOverride 来自 --bash 参数（优先级最高）。
+var bashPathOverride string
+
+// findBash 按 CLI 参数 > RBACKUP_BASH > PATH > 常见安装路径 的顺序查找 bash。
+func findBash() (string, error) {
+	if bashPathOverride != "" {
+		return bashPathOverride, nil
+	}
 	if p := os.Getenv("RBACKUP_BASH"); p != "" {
-		return p
+		return p, nil
 	}
 	if p, err := exec.LookPath("bash"); err == nil {
-		return p
+		return p, nil
 	}
 	candidates := []string{
 		`D:\msys64\usr\bin\bash.exe`,
@@ -85,33 +94,73 @@ func findBash() string {
 	}
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
-			return c
+			return c, nil
 		}
 	}
-	return "bash"
+	return "", fmt.Errorf("未找到 bash。Windows 请安装 Git for Windows 或 MSYS2，" +
+		"或设置 RBACKUP_BASH / 使用 --bash 指定 bash.exe 路径")
+}
+
+// toMSYSPath 把 Windows 盘符路径转换为 MSYS2/Git Bash 的 /c/... 形式。
+// 非盘符路径只把反斜杠换成正斜杠；UNC 路径保持原样（bash 下通常不可直接用）。
+func toMSYSPath(p string) string {
+	if p == "" || strings.HasPrefix(p, "/") {
+		return p
+	}
+	if strings.HasPrefix(p, `\\`) { // UNC
+		return p
+	}
+	if len(p) >= 2 && p[1] == ':' {
+		drive := strings.ToLower(p[:1])
+		rest := strings.ReplaceAll(p[2:], `\`, "/")
+		if !strings.HasPrefix(rest, "/") {
+			rest = "/" + rest
+		}
+		return "/" + drive + rest
+	}
+	return strings.ReplaceAll(p, `\`, "/")
+}
+
+// adaptBashPath 仅在 Windows 上把路径转换成 bash 可识别形式；其他平台原样返回。
+func adaptBashPath(p string) string {
+	if runtime.GOOS != "windows" {
+		return p
+	}
+	return toMSYSPath(p)
+}
+
+// probeCommand 通过 bash 检测命令是否存在（用于 --doctor 与启动提示）。
+func probeCommand(bash, name string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bash, "-c", "command -v "+name+" >/dev/null 2>&1")
+	return cmd.Run() == nil
 }
 
 // ---------- 对外接口 ----------
 
 func StreamTask(ctx context.Context, scriptPath, configPath, taskName string, onLine func(string)) *TaskResult {
-	args := []string{"--config", configPath, "--task", taskName}
+	args := []string{"--config", adaptBashPath(configPath), "--task", taskName}
 	return streamExec(ctx, scriptPath, args, taskName, onLine)
 }
 
 func StreamCheckMount(ctx context.Context, scriptPath, configPath string, onLine func(string)) *TaskResult {
-	args := []string{"--config", configPath, "--check-mount"}
+	args := []string{"--config", adaptBashPath(configPath), "--check-mount"}
 	return streamExec(ctx, scriptPath, args, "__check_mount__", onLine)
 }
 
 func StreamDryRun(ctx context.Context, scriptPath, configPath, taskName string, onLine func(string)) *TaskResult {
-	args := []string{"--config", configPath, "--task", taskName, "--dry-run"}
+	args := []string{"--config", adaptBashPath(configPath), "--task", taskName, "--dry-run"}
 	return streamExec(ctx, scriptPath, args, taskName, onLine)
 }
 
 // ---------- 核心执行 ----------
 
 func streamExec(ctx context.Context, scriptPath string, args []string, name string, onLine func(string)) *TaskResult {
-	bash := findBash()
+	bash, err := findBash()
+	if err != nil {
+		return &TaskResult{TaskName: name, ExitCode: -1, Err: err}
+	}
 
 	// 脚本路径验证
 	if scriptPath == "" {
@@ -122,7 +171,7 @@ func streamExec(ctx context.Context, scriptPath string, args []string, name stri
 			Err: fmt.Errorf("脚本不存在: %s", scriptPath)}
 	}
 
-	fullArgs := append([]string{scriptPath}, args...)
+	fullArgs := append([]string{adaptBashPath(scriptPath)}, args...)
 	cmd := exec.CommandContext(ctx, bash, fullArgs...)
 	setProcessGroup(cmd)
 

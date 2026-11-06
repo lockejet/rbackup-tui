@@ -341,6 +341,7 @@ func findConfigPath() string {
 	candidates := []string{
 		xdgPath,
 		filepath.Join(xdgConfigDir(), "rbackup-tui", "config.ini"), // 改名兼容
+		filepath.Join(home, ".config", "rbackup-ui", "config.ini"), // Git Bash/MSYS2 安装器布局
 		filepath.Join(home, "rbackup-ui", "config.ini"),
 		filepath.Join(home, "rbackup-tui", "config.ini"), // 改名兼容
 		filepath.Join(home, "rbackup", "config.ini"),     // 更旧布局
@@ -355,8 +356,9 @@ func findConfigPath() string {
 
 // Web 模式开关与选项（--web 相关参数；默认值见 web.go）。
 var (
-	webMode bool
-	webOpts = defaultWebOptions()
+	webMode    bool
+	webOpts    = defaultWebOptions()
+	doctorMode bool
 )
 
 // argValue 取形如 `--flag value` 的值；缺失或下一个参数是另一个选项时报错。
@@ -386,6 +388,8 @@ func usage() {
 全局选项:
   -c, --config <文件>     配置文件路径
   -s, --script <文件>     rbackup.sh 路径
+  --bash <文件>           指定 bash（默认自动探测；Windows 可指向 Git/MSYS2 的 bash.exe）
+  --doctor                打印运行环境诊断（bash/rsync/ssh/路径）后退出
   -h, --help              显示本帮助
 
 Web 选项:
@@ -509,6 +513,13 @@ func parseCLI(args []string) (configPath, scriptPath string, err error) {
 		case "--web-insecure-http":
 			webMode = true
 			webOpts.InsecureHTTP = true
+		case "--bash":
+			if v, err = argValue(args, &i, args[i]); err != nil {
+				return "", "", err
+			}
+			bashPathOverride = v
+		case "--doctor":
+			doctorMode = true
 		case "--web-read-only":
 			webMode = true
 			webOpts.ReadOnly = true
@@ -2373,6 +2384,13 @@ func isErrorLine(line string) bool {
 
 // ---------- main ----------
 func main() {
+	// --doctor 要在初始化 TUI（tcell 屏幕）之前处理
+	for _, a := range os.Args[1:] {
+		if a == "--doctor" {
+			os.Exit(runDoctorCLI())
+		}
+	}
+	warnRuntimeDeps()
 	a := NewApp()
 
 	if webMode {

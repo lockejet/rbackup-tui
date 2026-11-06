@@ -133,6 +133,7 @@ package-win: build-win
 	@cp $(DOC_FILES) $(STAGE_DIR)/$(BIN)-windows-amd64/
 	@mkdir -p $(STAGE_DIR)/$(BIN)-windows-amd64/docs/images
 	@cp docs/images/ui-overview.svg $(STAGE_DIR)/$(BIN)-windows-amd64/docs/images/
+	@[ -f install.ps1 ] && cp install.ps1 $(STAGE_DIR)/$(BIN)-windows-amd64/ || true
 	@cd $(STAGE_DIR) && zip -qr ../$(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip $(BIN)-windows-amd64
 	@echo ">>> $(DIST_DIR)/$(PKG_NAME)-windows-amd64.zip"
 
@@ -206,12 +207,13 @@ release-notes:
 stage-release-extras:
 	@mkdir -p $(DIST_DIR)
 	@install -m 0755 install.sh $(DIST_DIR)/install.sh
-	@echo ">>> $(DIST_DIR)/install.sh"
+	@install -m 0644 install.ps1 $(DIST_DIR)/install.ps1
+	@echo ">>> $(DIST_DIR)/install.sh $(DIST_DIR)/install.ps1"
 
 .PHONY: checksums
 checksums:
 	@cd $(DIST_DIR) && rm -f SHA256SUMS && \
-	  for f in *.tar.gz *.zip install.sh; do \
+	  for f in *.tar.gz *.zip install.sh install.ps1; do \
 	    [ -e "$$f" ] || continue; \
 	    sha256sum "$$f" >> SHA256SUMS; \
 	  done

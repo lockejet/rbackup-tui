@@ -54,6 +54,53 @@ jobs:
             gofmt -d "${files[@]}" | head -60
           fi
 
+  windows:
+    name: Windows 原生构建/测试/冒烟
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 构建
+        run: go build -ldflags "-X main.Version=ci" -o rbackup-ui.exe .
+
+      - name: 单元测试
+        run: go test ./...
+
+      - name: 诊断与 Web 冒烟
+        shell: pwsh
+        run: |
+          .\rbackup-ui.exe --help
+          .\rbackup-ui.exe --doctor
+          $proc = Start-Process -FilePath .\rbackup-ui.exe -ArgumentList @("--web", "--web-addr", "127.0.0.1:30099") -PassThru
+          try {
+            $ok = $false
+            for ($i = 0; $i -lt 40; $i++) {
+              Start-Sleep -Milliseconds 300
+              try {
+                $r = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:30099/health" -TimeoutSec 2
+                $ok = $true; break
+              } catch {}
+            }
+            if (-not $ok) { throw "Web /health 检查失败" }
+            Write-Host "health: $($r.Content)"
+            $r2 = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:30099/api/authinfo" -TimeoutSec 3
+            Write-Host "authinfo: $($r2.Content)"
+          } finally {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: 安装器脚本语法检查
+        shell: pwsh
+        run: |
+          $null = [scriptblock]::Create((Get-Content install.ps1 -Raw))
+          Write-Host "✓ install.ps1 语法 OK"
+
+
   shell-and-scripts:
     name: Shell 脚本与集成自测
     runs-on: ubuntu-latest
