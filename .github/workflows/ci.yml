@@ -95,14 +95,18 @@ jobs:
           }
 
       - name: 安装器脚本语法检查（Windows PowerShell 5.1 + UTF-8 BOM）
-        shell: powershell
+        shell: pwsh
+        # 注意：本步骤内联脚本只能用 ASCII。GitHub Actions 用 PS 5.1 执行中文内联脚本时
+        # 会按 ANSI 解析临时文件，导致和 install.ps1 一样的乱码问题。
         run: |
           $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path install.ps1))
           if ($bytes.Length -lt 3 -or $bytes[0] -ne 0xEF -or $bytes[1] -ne 0xBB -or $bytes[2] -ne 0xBF) {
-            throw "install.ps1 缺少 UTF-8 BOM：Windows PowerShell 5.1 会把脚本按 ANSI 解析，中文乱码"
+            throw "install.ps1 is missing the UTF-8 BOM (Windows PowerShell 5.1 would read it as ANSI)"
           }
-          $null = [scriptblock]::Create((Get-Content install.ps1 -Raw))
-          Write-Host "✓ install.ps1 语法 OK（PS 5.1）"
+          Write-Output "install.ps1 has UTF-8 BOM"
+          # Let Windows PowerShell 5.1 parse the BOM-ed file itself.
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "`$null = [scriptblock]::Create((Get-Content -Raw -LiteralPath 'install.ps1')); Write-Output 'install.ps1 parse OK under Windows PowerShell 5.1'"
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 failed to parse under Windows PowerShell 5.1" }
 
 
   shell-and-scripts:
