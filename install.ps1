@@ -1,8 +1,14 @@
-# rbackup-ui Windows 安装器（PowerShell 5.1+）
+﻿# rbackup-ui Windows 安装器（PowerShell 5.1+）
 #
-# 用法：
-#   irm https://github.com/lockejet/rbackup-ui/releases/latest/download/install.ps1 | iex
-#   .\install.ps1 [-Version v1.1.12] [-InstallDir DIR] [-AddToPath] [-Uninstall] [-DryRun]
+# 推荐用法（先下载再执行，避免 Windows PowerShell 5.1 的管道编码问题）：
+#   irm https://github.com/lockejet/rbackup-ui/releases/latest/download/install.ps1 -OutFile install.ps1
+#   powershell -ExecutionPolicy Bypass -File .\install.ps1
+#
+# 也可直接运行（若执行策略允许）：
+#   .\install.ps1 [-Version latest] [-InstallDir DIR] [-AddToPath] [-Uninstall] [-DryRun]
+#
+# 注意：不要用 `irm ... | iex`。Windows PowerShell 5.1 会把没有 charset 的下载内容
+#       按 Latin-1 解码，中文提示会乱码（安装本身仍会执行）；请用上面的 -OutFile 方式。
 #
 # 说明：
 #   - 下载官方 Release 的 rbackup-ui-<ver>-windows-amd64.zip，校验 SHA256 后解压安装；
@@ -12,6 +18,7 @@
 #   - -DryRun 只打印将要执行的动作。
 #
 # 依赖提示：备份任务需要 bash（Git for Windows 或 MSYS2）与 rsync（MSYS2: pacman -S rsync）。
+#           C:\Windows\System32\bash.exe 是 WSL 启动器，不是 Git Bash/MSYS2，程序会跳过它。
 
 [CmdletBinding()]
 param(
@@ -22,20 +29,60 @@ param(
     [switch]$DryRun
 )
 
+# 控制台输出切到 UTF-8：中文 Windows 默认 GBK，不切换会让中文/符号乱码。
+try {
+    [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+    $null = chcp.com 65001
+} catch {
+    # 无控制台（如某些 CI / 重定向场景）时忽略
+}
+
 $ErrorActionPreference = "Stop"
 $Repo = "lockejet/rbackup-ui"
 $ManifestName = "install-manifest.txt"
-$BashCandidates = @(
-    "C:\Program Files\Git\bin\bash.exe",
-    "C:\Program Files\Git\usr\bin\bash.exe",
-    "C:\msys64\usr\bin\bash.exe",
-    "D:\msys64\usr\bin\bash.exe"
-)
 
 function Info($msg) { Write-Host ">>> $msg" }
 function Warn($msg) { Write-Host "警告: $msg" -ForegroundColor Yellow }
 function Die($msg) { Write-Host "错误: $msg" -ForegroundColor Red; exit 1 }
 function Step($msg) { if ($DryRun) { Write-Host "[dry-run] $msg" } else { Info $msg } }
+
+# 查找 Git for Windows / MSYS2 的 bash（优先于 PATH，避免误选 WSL 启动器）。
+function Find-GitBash {
+    $candidates = @()
+    foreach ($envName in @("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)")) {
+        $root = [Environment]::GetEnvironmentVariable($envName)
+        if ($root) {
+            $candidates += (Join-Path $root "Git\bin\bash.exe")
+            $candidates += (Join-Path $root "Git\usr\bin\bash.exe")
+        }
+    }
+    $localAppData = [Environment]::GetEnvironmentVariable("LOCALAPPDATA")
+    if ($localAppData) {
+        $candidates += (Join-Path $localAppData "Programs\Git\bin\bash.exe")
+        $candidates += (Join-Path $localAppData "Programs\Git\usr\bin\bash.exe")
+    }
+    $candidates += "C:\msys64\usr\bin\bash.exe", "D:\msys64\usr\bin\bash.exe"
+    foreach ($c in $candidates) {
+        if ($c -and (Test-Path $c)) { return $c }
+    }
+    return $null
+}
+
+# bash 是否为 WSL 启动器（System32/Sysnative 下的 bash.exe）。
+function Test-WSLBash($path) {
+    if (-not $path) { return $false }
+    return ($path -like "*\System32\bash.exe") -or ($path -like "*\Sysnative\bash.exe")
+}
+
+# 用 bash 探测命令是否存在（成功返回 $true）。
+function Test-BashCommand($bash, $name) {
+    try {
+        & $bash -c "command -v $name" *> $null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
+}
 
 if ($PSVersionTable.PSVersion.Major -lt 5) { Die "需要 PowerShell 5.1 或更高版本" }
 
@@ -174,23 +221,39 @@ try {
     }
 
     # ---------- 依赖提示 ----------
-    $bash = $null
-    $cmd = Get-Command bash -ErrorAction SilentlyContinue
-    if ($cmd) { $bash = $cmd.Source }
-    if (-not $bash) { $bash = $BashCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+    # 优先用 Git/MSYS2 的 bash：PATH 里的 C:\Windows\System32\bash.exe 是 WSL 启动器。
+    $bash = Find-GitBash
+    $bashIsWSL = $false
+    if (-not $bash) {
+        $cmd = Get-Command bash -ErrorAction SilentlyContinue
+        if ($cmd) {
+            $bash = $cmd.Source
+            $bashIsWSL = Test-WSLBash $bash
+        }
+    }
     Write-Host ""
     if (-not $bash) {
         Warn "未找到 bash：备份任务需要 Git for Windows 或 MSYS2 提供 bash"
         Warn "  安装 Git for Windows: https://git-scm.com/download/win"
         Warn "  或 MSYS2（并安装 rsync）: pacman -S rsync"
+        Warn "  装好后可运行: $InstallDir\rbackup-ui.exe --doctor 复检"
+    } elseif ($bashIsWSL) {
+        Warn "只找到 WSL 启动器 bash：$bash"
+        Warn "  它不是 Git Bash/MSYS2，不能直接用于备份任务；请安装 Git for Windows 或 MSYS2"
+        Warn "  已安装但不在常见路径？运行时可用 --bash 指定，例如："
+        Warn "  $InstallDir\rbackup-ui.exe --bash C:\msys64\usr\bin\bash.exe"
     } else {
         Info "bash: $bash"
-        $bashDir = Split-Path (Split-Path $bash -Parent) -Parent
-        if (Test-Path (Join-Path $bashDir "usr\bin\rsync.exe")) {
-            Info "rsync: 已找到（MSYS2）"
+        if (Test-BashCommand $bash "rsync") {
+            Info "rsync: 已找到"
         } else {
             Warn "未在 bash 环境中找到 rsync；如用 MSYS2 请执行: pacman -S rsync"
             Warn "（Git for Windows 默认不带 rsync，可用 MSYS2 或 cwRsync）"
+        }
+        foreach ($tool in @("ssh", "sed", "awk")) {
+            if (-not (Test-BashCommand $bash $tool)) {
+                Warn "未找到 $tool（备份任务需要）"
+            }
         }
     }
 

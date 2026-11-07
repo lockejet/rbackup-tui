@@ -75,7 +75,12 @@ func parseStatsLine(line string) *TaskStats {
 // bashPathOverride 来自 --bash 参数（优先级最高）。
 var bashPathOverride string
 
-// findBash 按 CLI 参数 > RBACKUP_BASH > PATH > 常见安装路径 的顺序查找 bash。
+// findBash 按 CLI 参数 > RBACKUP_BASH > 常见安装路径 > PATH 的顺序查找 bash。
+//
+// Windows 上必须跳过 C:\Windows\System32\bash.exe：那是 WSL 的启动器，
+// 不是 Git Bash/MSYS2。它一旦被当成 bash 使用，依赖探测（rsync/ssh/sed/awk）
+// 会跑进 WSL 环境里，路径也应该是 /mnt/c/... 而不是 /c/...，备份任务会失败。
+// 因此常见 Git/MSYS2 路径优先于 PATH 查找。
 func findBash() (string, error) {
 	if bashPathOverride != "" {
 		return bashPathOverride, nil
@@ -83,22 +88,67 @@ func findBash() (string, error) {
 	if p := os.Getenv("RBACKUP_BASH"); p != "" {
 		return p, nil
 	}
-	if p, err := exec.LookPath("bash"); err == nil {
-		return p, nil
-	}
-	candidates := []string{
-		`D:\msys64\usr\bin\bash.exe`,
-		`C:\msys64\usr\bin\bash.exe`,
-		`C:\Program Files\Git\bin\bash.exe`,
-		`C:\Program Files\Git\usr\bin\bash.exe`,
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c, nil
+	if runtime.GOOS == "windows" {
+		for _, c := range windowsBashCandidates() {
+			if _, err := os.Stat(c); err == nil {
+				return c, nil
+			}
 		}
+	}
+	if p, err := exec.LookPath("bash"); err == nil {
+		if !isWSLLauncher(p) {
+			return p, nil
+		}
+		return "", fmt.Errorf("只找到 WSL 的 bash（%s），它不是 Git Bash/MSYS2，"+
+			"无法直接执行备份任务。请安装 Git for Windows 或 MSYS2，"+
+			"或用 --bash 指定 bash.exe 的完整路径", p)
 	}
 	return "", fmt.Errorf("未找到 bash。Windows 请安装 Git for Windows 或 MSYS2，" +
 		"或设置 RBACKUP_BASH / 使用 --bash 指定 bash.exe 路径")
+}
+
+// windowsBashCandidates 返回 Windows 上常见的 Git for Windows / MSYS2 bash 路径。
+// 用环境变量拼路径，兼容 Program Files 装在非 C: 盘、以及当前用户级安装。
+func windowsBashCandidates() []string {
+	var out []string
+	seen := make(map[string]bool)
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		key := strings.ToLower(p)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		out = append(out, p)
+	}
+	for _, env := range []string{"ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"} {
+		if dir := os.Getenv(env); dir != "" {
+			add(filepath.Join(dir, "Git", "bin", "bash.exe"))
+			add(filepath.Join(dir, "Git", "usr", "bin", "bash.exe"))
+		}
+	}
+	if dir := os.Getenv("LOCALAPPDATA"); dir != "" {
+		add(filepath.Join(dir, "Programs", "Git", "bin", "bash.exe"))
+		add(filepath.Join(dir, "Programs", "Git", "usr", "bin", "bash.exe"))
+	}
+	add(`C:\msys64\usr\bin\bash.exe`)
+	add(`D:\msys64\usr\bin\bash.exe`)
+	return out
+}
+
+// isWSLLauncher 判断路径是否为 Windows 自带的 WSL 启动器（System32\bash.exe）。
+// 纯字符串判断，便于在非 Windows 上做单元测试。
+func isWSLLauncher(p string) bool {
+	s := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(p), `\`, "/"))
+	s = strings.TrimRight(s, "/")
+	const suffix = "/bash.exe"
+	if !strings.HasSuffix(s, suffix) {
+		return false
+	}
+	dir := strings.TrimSuffix(s, suffix)
+	return strings.HasSuffix(dir, "/system32") || strings.HasSuffix(dir, "/sysnative")
 }
 
 // toMSYSPath 把 Windows 盘符路径转换为 MSYS2/Git Bash 的 /c/... 形式。

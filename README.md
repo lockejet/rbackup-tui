@@ -619,9 +619,11 @@ TUI 与 Web UI 都是同一个单二进制，Windows 上可原生运行；备份
 #    MSYS2 中执行： pacman -S rsync
 #    然后把 C:\msys64\usr\bin 加入 PATH（或复制 rsync.exe 到 PATH 中）
 
-# 2) 安装（PowerShell 一键；也可下载 windows-amd64.zip 解压）
-irm https://github.com/lockejet/rbackup-ui/releases/latest/download/install.ps1 | iex
-# 可选参数：-AddToPath  -Version v1.1.12  -InstallDir DIR  -DryRun  -Uninstall
+# 2) 安装（PowerShell；先下载再执行，避免 PS 5.1 管道编码问题）
+irm https://github.com/lockejet/rbackup-ui/releases/latest/download/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+# 可选参数：-AddToPath  -Version latest  -InstallDir DIR  -DryRun  -Uninstall
+# 注意：不要用 `irm ... | iex`——PS 5.1 会把没有 charset 的下载内容按 Latin-1 解码，中文提示乱码。
 
 # 3) 自检：bash / rsync / ssh / 配置 / 脚本 / 日志路径
 rbackup-ui.exe --doctor
@@ -635,6 +637,10 @@ rbackup-ui.exe --web                              # Web UI → http://127.0.0.1:
   日志 `%LOCALAPPDATA%\rbackup-ui\Logs`。
 - 找不到 bash 时可用 `--bash "C:\Program Files\Git\bin\bash.exe"` 或环境变量 `RBACKUP_BASH` 指定；
   程序会把传给 bash 的 Windows 路径自动转换成 MSYS2 的 `/c/...` 形式。
+- **不要用 `C:\Windows\System32\bash.exe`**：那是 WSL 的启动器，不是 Git Bash/MSYS2；
+  程序会自动跳过它并优先使用 Git for Windows / MSYS2 的 bash（`--doctor` 会指出）。
+- 中文控制台：程序启动时会把 Windows 控制台输出代码页切到 UTF-8；若仍有乱码，
+  在 PowerShell 里执行 `chcp 65001` 后再运行。
 - 局域网/手机访问：`--web-addr 0.0.0.0:30031`（仍需 token+TLS 或内网 `--web-insecure-http`），
   并在 Windows 防火墙放行该端口；手机登录二维码使用你当前访问 Web 的地址生成。
 - 开机自启：用「任务计划程序」在登录时运行 `rbackup-ui.exe --web ...`。

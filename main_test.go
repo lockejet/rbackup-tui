@@ -117,6 +117,33 @@ func TestToMSYSPath(t *testing.T) {
 	}
 }
 
+func TestIsWSLLauncher(t *testing.T) {
+	wsl := []string{
+		`C:\Windows\System32\bash.exe`,
+		`c:\windows\system32\bash.exe`,
+		`C:\Windows\Sysnative\bash.exe`,
+		`C:/Windows/System32/bash.exe`,
+	}
+	for _, p := range wsl {
+		if !isWSLLauncher(p) {
+			t.Fatalf("isWSLLauncher(%q) 应为 true", p)
+		}
+	}
+	notWSL := []string{
+		`C:\Program Files\Git\bin\bash.exe`,
+		`C:\msys64\usr\bin\bash.exe`,
+		`D:\msys64\usr\bin\bash.exe`,
+		`C:\Program Files\Git\usr\bin\bash.exe`,
+		`/usr/bin/bash`,
+		``,
+	}
+	for _, p := range notWSL {
+		if isWSLLauncher(p) {
+			t.Fatalf("isWSLLauncher(%q) 应为 false", p)
+		}
+	}
+}
+
 func TestParseCLIBashAndDoctor(t *testing.T) {
 	oldMode, oldOpts := webMode, webOpts
 	oldBash, oldDoctor := bashPathOverride, doctorMode

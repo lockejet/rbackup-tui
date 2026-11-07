@@ -48,7 +48,7 @@ jobs:
       - name: gofmt 提示（不阻塞）
         continue-on-error: true
         run: |
-          mapfile -t files < <(gofmt -l main.go config.go runner.go main_test.go web.go webauth.go websec.go qrterm.go web_test.go proc_unix.go proc_windows.go)
+          mapfile -t files < <(gofmt -l main.go config.go runner.go main_test.go web.go webauth.go websec.go qrterm.go web_test.go proc_unix.go proc_windows.go console_windows.go console_other.go)
           if [ "${#files[@]}" -gt 0 ]; then
             echo "::warning::以下文件未通过 gofmt: ${files[*]}"
             gofmt -d "${files[@]}" | head -60
@@ -94,11 +94,15 @@ jobs:
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
           }
 
-      - name: 安装器脚本语法检查
-        shell: pwsh
+      - name: 安装器脚本语法检查（Windows PowerShell 5.1 + UTF-8 BOM）
+        shell: powershell
         run: |
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path install.ps1))
+          if ($bytes.Length -lt 3 -or $bytes[0] -ne 0xEF -or $bytes[1] -ne 0xBB -or $bytes[2] -ne 0xBF) {
+            throw "install.ps1 缺少 UTF-8 BOM：Windows PowerShell 5.1 会把脚本按 ANSI 解析，中文乱码"
+          }
           $null = [scriptblock]::Create((Get-Content install.ps1 -Raw))
-          Write-Host "✓ install.ps1 语法 OK"
+          Write-Host "✓ install.ps1 语法 OK（PS 5.1）"
 
 
   shell-and-scripts:

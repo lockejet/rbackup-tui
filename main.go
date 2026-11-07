@@ -2384,6 +2384,10 @@ func isErrorLine(line string) bool {
 
 // ---------- main ----------
 func main() {
+	// Windows 中文控制台默认 GBK，先把输出代码页切到 UTF-8，
+	// 否则 CLI 中文与 ✓/✗ 会乱码、列错位（TUI 由 tcell 自行处理，不受影响）。
+	enableUTF8Console()
+
 	// --doctor 要在初始化 TUI（tcell 屏幕）之前处理
 	for _, a := range os.Args[1:] {
 		if a == "--doctor" {

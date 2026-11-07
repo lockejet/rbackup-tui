@@ -23,6 +23,9 @@ func runDoctorCLI() int {
 	fmt.Println("依赖:")
 	if bashErr != nil {
 		fmt.Printf("  bash      ✗ %v\n", bashErr)
+		if runtime.GOOS == "windows" {
+			fmt.Println("            （请使用 Git for Windows / MSYS2 的 bash；C:\\Windows\\System32\\bash.exe 是 WSL 启动器，不能用）")
+		}
 	} else {
 		fmt.Printf("  bash      ✓ %s\n", bash)
 		for _, name := range []string{"rsync", "ssh", "sed", "awk"} {
